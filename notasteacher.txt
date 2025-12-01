@@ -1,0 +1,310 @@
+// src/pages/teacher/Notas.tsx
+import { useEffect, useMemo, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { CheckCircle2, Lock, Unlock, Info, CloudOff, Cloud, RefreshCw } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+import Gradebook, { type GradebookData } from "@/components/gradebook/Gradebook";
+import {
+  getGradebook,
+  saveGradebook,
+  publishGradebook,
+  unlockGradebook,
+  syncGradebookQueue,
+} from "@/services/gradebookApi";
+
+import TermBadge from "@/components/gradebook/TermBadge";
+
+export default function NotasTeacher() {
+  const [data, setData] = useState<GradebookData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [queueCount, setQueueCount] = useState<number>(0);
+  const [syncing, setSyncing] = useState(false);
+  const { toast } = useToast();
+
+  // En la vida real lo tomas de selección del profesor / URL / estado global
+  const sectionId = "SEC-3A-2025";
+
+  // Helpers para leer info de cache local (último guardado y cola)
+  function readQueueCount(): number {
+    try {
+      const raw = localStorage.getItem("gradebook:queue");
+      if (!raw) return 0;
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function readLastLocalSavedAt(): string | null {
+    try {
+      const raw = localStorage.getItem(`gradebook:${sectionId}`);
+      if (!raw) return null;
+      const env = JSON.parse(raw) as { updatedAt?: string };
+      return env?.updatedAt ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setErrorMsg(null);
+    getGradebook(sectionId)
+      .then((res) => mounted && setData(res))
+      .catch(() => {
+        // Fallback para desarrollo / sin backend
+        if (!mounted) return;
+        setData({
+          minScore: 0,
+          maxScore: 100,
+          locked: false,
+          dropLowest: false,
+          terms: [
+            { id: "T1", name: "Trimestre 1", weight: 1 / 3 },
+            { id: "T2", name: "Trimestre 2", weight: 1 / 3 },
+            { id: "T3", name: "Trimestre 3", weight: 1 / 3 },
+          ],
+          currentTerm: "T1",
+          students: [
+            { id: "S1", name: "Ana Torres" },
+            { id: "S2", name: "Bruno Díaz" },
+            { id: "S3", name: "Carla Rojas" },
+          ],
+          columns: [
+            { id: "C1", title: "PC1", weight: 0.5, termId: "T1" },
+            { id: "C2", title: "Tarea 1", weight: 0.5, termId: "T1" },
+            { id: "C3", title: "Examen T2", weight: 1, termId: "T2" },
+            { id: "C4", title: "Proyecto T3", weight: 1, termId: "T3" },
+          ],
+          grades: {
+            "S1:C1": 75, "S1:C2": 88, "S1:C3": 83, "S1:C4": 94,
+            "S2:C1": 62, "S2:C2": 80, "S2:C3": 71, "S2:C4": 79,
+            "S3:C1": 95, "S3:C2": 98, "S3:C3": 92, "S3:C4": 99,
+          },
+          comments: {},
+        });
+        setErrorMsg("No se pudo cargar desde la API. Se muestra un libro local de ejemplo.");
+      })
+      .finally(() => mounted && setLoading(false));
+    return () => {
+      mounted = false;
+    };
+  }, [sectionId]);
+
+  // Actualiza contador de cola offline de forma periódica y ante cambios de conexión
+  useEffect(() => {
+    const updateQueue = () => setQueueCount(readQueueCount());
+    updateQueue();
+
+    const id = window.setInterval(updateQueue, 4000);
+    const onOnline = async () => {
+      // Al reconectar intentamos sincronizar automáticamente
+      try {
+        setSyncing(true);
+        const res = await syncGradebookQueue();
+        updateQueue();
+        if (res.processed > 0) {
+          toast({
+            title: "Sincronización completada",
+            description: `${res.processed} cambio(s) enviado(s). Pendientes: ${res.remaining}.`,
+          });
+          // volvemos a cargar para traer datos frescos del backend
+          setLoading(true);
+          getGradebook(sectionId)
+            .then((r) => setData(r))
+            .finally(() => setLoading(false));
+        }
+      } finally {
+        setSyncing(false);
+      }
+    };
+
+    window.addEventListener("online", onOnline);
+    window.addEventListener("storage", updateQueue);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("storage", updateQueue);
+      clearInterval(id);
+    };
+  }, [sectionId, toast]);
+
+  const currentTerm = useMemo(
+    () => data?.terms?.find((t) => t.id === data?.currentTerm),
+    [data]
+  );
+
+  const handleSave = async (payload: GradebookData) => {
+    await saveGradebook(sectionId, payload);
+    const last = readLastLocalSavedAt();
+    toast({
+      title: "Cambios guardados",
+      description: last ? `Último guardado local: ${new Date(last).toLocaleString()}` : "Guardado local actualizado.",
+    });
+    setQueueCount(readQueueCount());
+  };
+
+  const handlePublish = async () => {
+    await publishGradebook(sectionId); // el servicio maneja offline/cola internamente
+    setData((d) => (d ? { ...d, locked: true } : d));
+    setQueueCount(readQueueCount());
+    toast({
+      title: "Libro publicado",
+      description: navigator.onLine ? "Se bloqueó la edición para todos." : "Sin conexión: se enviará al reconectar.",
+    });
+  };
+
+  const handleUnlock = async () => {
+    await unlockGradebook(sectionId); // el servicio maneja offline/cola internamente
+    setData((d) => (d ? { ...d, locked: false } : d));
+    setQueueCount(readQueueCount());
+    toast({
+      title: "Libro desbloqueado",
+      description: navigator.onLine ? "La edición vuelve a estar disponible." : "Sin conexión: se enviará al reconectar.",
+    });
+  };
+
+  const handleManualSync = async () => {
+    try {
+      setSyncing(true);
+      const res = await syncGradebookQueue();
+      setQueueCount(readQueueCount());
+      toast({
+        title: "Sincronización",
+        description: `Procesados: ${res.processed}. Pendientes: ${res.remaining}.`,
+      });
+      // si hubo cambios, recargar
+      if (res.processed > 0) {
+        setLoading(true);
+        getGradebook(sectionId)
+          .then((r) => setData(r))
+          .finally(() => setLoading(false));
+      }
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const lastSaved = readLastLocalSavedAt();
+
+  return (
+    <Card className="border border-primary/15">
+      <CardHeader className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="flex items-center gap-2">
+            Libro de notas — <span className="font-medium">{sectionId}</span>
+            {data?.currentTerm && <TermBadge term={data.currentTerm as "T1" | "T2" | "T3"} />}
+          </CardTitle>
+
+          {/* Estado de conexión + sincronización */}
+          <div className="flex items-center gap-2">
+            <Badge
+              variant={navigator.onLine ? "success" : "destructive"}
+              className="flex items-center gap-1"
+              title={navigator.onLine ? "Conectado" : "Sin conexión"}
+            >
+              {navigator.onLine ? <Cloud className="h-3.5 w-3.5" /> : <CloudOff className="h-3.5 w-3.5" />}
+              {navigator.onLine ? "Online" : "Offline"}
+            </Badge>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleManualSync}
+              disabled={syncing || queueCount === 0}
+              title="Enviar cambios pendientes"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Sincronizando…" : "Sincronizar"}
+            </Button>
+
+            {queueCount > 0 && (
+              <Badge variant="secondary" title="Cambios pendientes por enviar">
+                Pendientes: {queueCount}
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {/* Estado / Acciones */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            variant={data?.locked ? "destructive" : "success"}
+            className="uppercase tracking-wide"
+          >
+            {data?.locked ? "Bloqueado" : "Editable"}
+          </Badge>
+
+          {lastSaved && (
+            <Badge variant="outline" className="text-xs" title="Último guardado local">
+              Guardado local: {new Date(lastSaved).toLocaleString()}
+            </Badge>
+          )}
+
+          <Separator orientation="vertical" className="mx-1 h-6" />
+
+          <Button
+            variant="destructive"
+            onClick={handlePublish}
+            disabled={!!data?.locked || loading}
+          >
+            <Lock className="h-4 w-4 mr-2" /> Publicar (bloquear)
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleUnlock}
+            disabled={!data?.locked || loading}
+          >
+            <Unlock className="h-4 w-4 mr-2" /> Desbloquear
+          </Button>
+
+          {currentTerm && (
+            <>
+              <Separator orientation="vertical" className="mx-1 h-6" />
+              <Badge variant="secondary">
+                {currentTerm.name} · Peso {(currentTerm.weight * 100).toFixed(0)}%
+              </Badge>
+            </>
+          )}
+        </div>
+
+        {/* Alertas de información/errores */}
+        {errorMsg ? (
+          <Alert variant="destructive" className="mt-1">
+            <AlertTitle>Sin conexión a la API</AlertTitle>
+            <AlertDescription>{errorMsg}</AlertDescription>
+          </Alert>
+        ) : (
+          <Alert className="bg-primary/5 border-primary/20 mt-1">
+            <Info className="h-4 w-4" />
+            <AlertTitle>Consejo</AlertTitle>
+            <AlertDescription>
+              Usa <strong>Ctrl+S</strong> para guardar, <strong>Ctrl+Z/Y</strong> para deshacer/rehacer y
+              <strong> Delete</strong> para limpiar celdas.
+            </AlertDescription>
+          </Alert>
+        )}
+      </CardHeader>
+
+      <CardContent>
+        {loading && (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <CheckCircle2 className="h-4 w-4 animate-pulse" />
+            Cargando libro…
+          </div>
+        )}
+
+        {!loading && data && (
+          <Gradebook initial={data} onSave={handleSave} />
+        )}
+      </CardContent>
+    </Card>
+  );
+}

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Plataforma Académica — Seguimiento Escolar</title>
+
+    <!-- SEO básico -->
+    <meta
+      name="description"
+      content="Plataforma web académica para seguimiento escolar en línea. Conecta a padres, estudiantes y docentes con notas, asistencia y reportes en tiempo real."
+    />
+    <meta name="author" content="Plataforma Académica" />
+    <link rel="canonical" href="https://tu-dominio.com/" />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+
+    <!-- Color / tema -->
+    <meta name="theme-color" content="#0ea5e9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b79b5" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:locale" content="es_PE" />
+    <meta property="og:title" content="Plataforma Académica — Seguimiento Escolar" />
+    <meta
+      property="og:description"
+      content="Tu aula digital: notas, conducta, progreso y asistencia por trimestres."
+    />
+    <meta property="og:type" content="website" />
+    <!-- Imagen principal (tu enlace de Facebook) -->
+    <meta
+      property="og:image"
+      content="https://www.facebook.com/photo/?fbid=726172363738468&set=a.116496931372684&__tn__=%3C"
+    />
+    <!-- Fallback local recomendado (coloca este archivo en /public/assets/og-image.jpg) -->
+    <meta property="og:image:alt" content="Vista previa de la Plataforma Académica" />
+    <meta property="og:site_name" content="Plataforma Académica" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Plataforma Académica — Seguimiento Escolar" />
+    <meta
+      name="twitter:description"
+      content="Conecta familia y escuela con seguimiento por trimestres."
+    />
+    <meta
+      name="twitter:image"
+      content="https://www.facebook.com/photo/?fbid=726172363738468&set=a.116496931372684&__tn__=%3C"
+    />
+
+    <!-- App / PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+<meta name="mobile-web-app-capable" content="yes">
+
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
+    <meta name="msapplication-TileColor" content="#0ea5e9" />
+
+    <!-- Tipografías -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Usa display=swap para que no bloquee el render -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Datos estructurados (JSON-LD) -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Plataforma Académica",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Web",
+        "url": "https://tu-dominio.com/",
+        "description": "Plataforma escolar con notas, progreso y asistencia por trimestres para Inicial, Primaria y Secundaria.",
+        "author": { "@type": "Organization", "name": "Plataforma Académica" }
+      }
+    </script>
+  </head>
+
+  <body>
+    <noscript>
+      Necesitas habilitar JavaScript para usar la Plataforma Académica.
+    </noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
