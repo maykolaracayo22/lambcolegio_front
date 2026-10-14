@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardHeader,
@@ -44,44 +44,132 @@ import {
   PlusCircle,
   Search,
   Send,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import {
+  getOverdueCharges,
+  getFinanceSummary,
+  formatCurrency,
+  getMonthName,
+  type AccountCharge,
+  type StudentAccount,
+  type FinanceSummary,
+} from "@/services/finanzasApi";
+
+// Tipo extendido para deudor
+interface Deudor {
+  student_id: number;
+  student_name: string;
+  nivel: string;
+  total_adeudado: number;
+  meses_adeudados: string[];
+  dias_mora: number;
+  status: string;
+}
 
 // RFs cubiertos: RF-010, RF-011, RF-012
 export default function Morosidad() {
-  const [deudores] = useState([
-    {
-      id: "E-001",
-      nombre: "María Lopez",
-      nivel: "Secundaria",
-      adeudado: 1200,
-      mesesAdeudados: ["Enero", "Febrero", "Marzo"],
-      estado: "vencido",
-      diasMora: 45,
-      planPago: false,
-    },
-    {
-      id: "E-002",
-      nombre: "Pedro Ruiz",
-      nivel: "Primaria",
-      adeudado: 400,
-      mesesAdeudados: ["Marzo"],
-      estado: "pendiente",
-      diasMora: 15,
-      planPago: true,
-    },
-  ]);
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [deudores, setDeudores] = useState<Deudor[]>([]);
+  const [summary, setSummary] = useState<FinanceSummary | null>(null);
 
-  const [planesPago] = useState([
-    {
-      id: "PP-001",
-      estudiante: "Pedro Ruiz",
-      montoTotal: 400,
-      cuotas: 2,
-      montoCuota: 200,
-      fechaInicio: "2025-03-15",
-      estado: "activo",
-    },
-  ]);
+  useEffect(() => {
+    // Verificar que hay token antes de hacer peticiones
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      console.log('[Morosidad] Esperando autenticación...');
+      setLoading(false);
+      return;
+    }
+    
+    const timer = setTimeout(() => {
+      loadData();
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadData() {
+    // Doble verificación de token
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    
+    try {
+      setLoading(true);
+      const [overdueData, summaryData] = await Promise.all([
+        getOverdueCharges(),
+        getFinanceSummary(),
+      ]);
+
+      setSummary(summaryData);
+
+      // Agrupar cargos vencidos por estudiante
+      const deudoresMap = new Map<number, Deudor>();
+      
+      overdueData.data.forEach((charge: AccountCharge & { studentAccount: StudentAccount }) => {
+        const studentId = charge.studentAccount.student_id;
+        const studentName = charge.studentAccount.student?.nombres + ' ' + charge.studentAccount.student?.apellidos;
+        const nivel = charge.studentAccount.student?.nivel || 'N/A';
+        
+        if (!deudoresMap.has(studentId)) {
+          deudoresMap.set(studentId, {
+            student_id: studentId,
+            student_name: studentName,
+            nivel: nivel,
+            total_adeudado: 0,
+            meses_adeudados: [],
+            dias_mora: 0,
+            status: 'pendiente',
+          });
+        }
+
+        const deudor = deudoresMap.get(studentId)!;
+        deudor.total_adeudado += (charge.amount - charge.paid_amount);
+        
+        // Agregar mes si no existe
+        const mesNombre = getMonthName(charge.month);
+        if (!deudor.meses_adeudados.includes(mesNombre)) {
+          deudor.meses_adeudados.push(mesNombre);
+        }
+
+        // Calcular días de mora
+        const dueDate = new Date(charge.due_date);
+        const today = new Date();
+        const diasMora = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (diasMora > deudor.dias_mora) {
+          deudor.dias_mora = diasMora;
+        }
+
+        // Actualizar estado
+        if (diasMora > 30) {
+          deudor.status = 'vencido';
+        }
+      });
+
+      setDeudores(Array.from(deudoresMap.values()));
+    } catch (error) {
+      console.error("Error cargando datos:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No se pudieron cargar los datos de morosidad",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <span className="ml-2">Cargando datos de morosidad...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -93,63 +181,74 @@ export default function Morosidad() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={loadData}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Actualizar
+          </Button>
           <Button variant="outline">
             <Mail className="mr-2 h-4 w-4" />
             Recordatorios
           </Button>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button>
-                <PlusCircle className="mr-2 h-4 w-4" />
-                Nuevo Plan de Pago
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px]">
-              <DialogHeader>
-                <DialogTitle>Crear Plan de Pago</DialogTitle>
-                <DialogDescription>
-                  Configure un plan de pagos personalizado
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label>Estudiante</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccione estudiante" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="maria">María Lopez</SelectItem>
-                      <SelectItem value="pedro">Pedro Ruiz</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Monto Total Adeudado</Label>
-                  <Input disabled value="1,200 Bs" />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Número de Cuotas</Label>
-                  <Input type="number" placeholder="Ej: 3" />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Fecha Primera Cuota</Label>
-                  <Input type="date" />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline">Cancelar</Button>
-                <Button>Crear Plan</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
         </div>
       </div>
+
+      {/* Tarjetas de Resumen */}
+      {summary && (
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Estudiantes en Mora
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-600">
+                {summary.resumen_estados.en_mora}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Total Deuda
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatCurrency(summary.resumen_financiero.total_pendiente)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Cargos Vencidos
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-yellow-600">
+                {deudores.length}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                % Recaudación
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">
+                {summary.resumen_financiero.porcentaje_recaudado}%
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <Tabs defaultValue="deudores" className="w-full">
         <TabsList>
           <TabsTrigger value="deudores">Deudores</TabsTrigger>
-          <TabsTrigger value="planes">Planes de Pago</TabsTrigger>
           <TabsTrigger value="configuracion">Intereses</TabsTrigger>
         </TabsList>
 
@@ -164,128 +263,80 @@ export default function Morosidad() {
                     Estudiantes con pagos pendientes o vencidos
                   </CardDescription>
                 </div>
-                <Input
-                  placeholder="Buscar deudor..."
-                  className="max-w-xs"
-                  type="search"
-                />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Estudiante</TableHead>
-                      <TableHead>Nivel</TableHead>
-                      <TableHead>Monto Adeudado</TableHead>
-                      <TableHead>Meses</TableHead>
-                      <TableHead>Días Mora</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Plan de Pago</TableHead>
-                      <TableHead>Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {deudores.map((d) => (
-                      <TableRow key={d.id}>
-                        <TableCell>{d.nombre}</TableCell>
-                        <TableCell>{d.nivel}</TableCell>
-                        <TableCell>{d.adeudado} Bs</TableCell>
-                        <TableCell>{d.mesesAdeudados.join(", ")}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={d.diasMora > 30 ? "destructive" : "secondary"}
-                          >
-                            {d.diasMora} días
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              d.estado === "vencido" ? "destructive" : "default"
-                            }
-                          >
-                            {d.estado}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {d.planPago ? (
-                            <Badge variant="default">Activo</Badge>
-                          ) : (
-                            <Badge variant="outline">No tiene</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Button variant="ghost" size="icon">
-                              <Send className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon">
-                              <Phone className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* RF-011: Planes de Pago */}
-        <TabsContent value="planes">
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
-                  <CardTitle>Planes de Pago Activos</CardTitle>
-                  <CardDescription>
-                    Seguimiento de planes de pago personalizados
-                  </CardDescription>
+              {deudores.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No hay cargos vencidos</p>
+                  <p className="text-sm">
+                    Todos los estudiantes están al día
+                  </p>
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>ID Plan</TableHead>
-                      <TableHead>Estudiante</TableHead>
-                      <TableHead>Monto Total</TableHead>
-                      <TableHead>Cuotas</TableHead>
-                      <TableHead>Monto Cuota</TableHead>
-                      <TableHead>Inicio</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {planesPago.map((p) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-mono">{p.id}</TableCell>
-                        <TableCell>{p.estudiante}</TableCell>
-                        <TableCell>{p.montoTotal} Bs</TableCell>
-                        <TableCell>{p.cuotas}</TableCell>
-                        <TableCell>{p.montoCuota} Bs</TableCell>
-                        <TableCell>{p.fechaInicio}</TableCell>
-                        <TableCell>
-                          <Badge variant="default">{p.estado}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="sm">
-                            <FileText className="mr-2 h-4 w-4" />
-                            Ver Plan
-                          </Button>
-                        </TableCell>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Estudiante</TableHead>
+                        <TableHead>Nivel</TableHead>
+                        <TableHead className="text-right">Monto Adeudado</TableHead>
+                        <TableHead>Meses</TableHead>
+                        <TableHead>Días Mora</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Acciones</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {deudores.map((d) => (
+                        <TableRow key={d.student_id}>
+                          <TableCell className="font-medium">{d.student_name}</TableCell>
+                          <TableCell className="capitalize">{d.nivel}</TableCell>
+                          <TableCell className="text-right font-semibold text-red-600">
+                            {formatCurrency(d.total_adeudado)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              {d.meses_adeudados.map((mes) => (
+                                <Badge key={mes} variant="outline" className="text-xs">
+                                  {mes}
+                                </Badge>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={d.dias_mora > 30 ? "destructive" : "secondary"}
+                            >
+                              {d.dias_mora} días
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                d.status === "vencido" ? "destructive" : "secondary"
+                              }
+                            >
+                              {d.status === "vencido" ? "Vencido" : "Pendiente"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Button variant="ghost" size="icon" title="Enviar recordatorio">
+                                <Send className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" title="Llamar">
+                                <Phone className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

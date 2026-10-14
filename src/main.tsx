@@ -14,11 +14,17 @@ if (import.meta.env.DEV && !(import.meta as any).env?.VITE_API_BASE) {
   import("@/services/mockServer").then((m) => m.installMock());
 }
 
-// 👉 Sincronizar secciones reales desde el backend (si hay API)
+// Sincronizar el catálogo global de secciones solo en una sesión administrativa.
+// Docentes y estudiantes usan endpoints limitados a sus secciones y no tienen
+// autorización para consultar el catálogo completo.
 (async () => {
   try {
     const year = localStorage.getItem("adm:year") || String(new Date().getFullYear());
-    if (HAS_API) {
+    const savedUser = localStorage.getItem("authUser");
+    const user = savedUser ? JSON.parse(savedUser) : null;
+    const role = String(user?.role || "").toLowerCase();
+    const canReadAllSections = ["admin", "superadmin", "director general", "director_general"].includes(role);
+    if (HAS_API && localStorage.getItem("authToken") && canReadAllSections) {
       await syncSectionsFromApi(year);
     }
   } catch (e) {

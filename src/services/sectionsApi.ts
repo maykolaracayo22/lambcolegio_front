@@ -1,6 +1,15 @@
 import axios, { AxiosInstance } from "axios";
+import { API_BASE } from "@/lib/config";
 
 export type NivelKey = "inicial" | "primaria" | "secundaria";
+
+// Tutor info embedded in Section response
+export type TutorInfo = {
+  id: number;
+  nombres: string;
+  apellidos: string;
+  email?: string;
+};
 
 export type Section = {
   id: number | string;
@@ -12,6 +21,8 @@ export type Section = {
   aula?: string | null;
   capacidad?: number | null;
   tutor_id?: number | null;
+  tutor?: TutorInfo | null; // Eager loaded tutor info
+  estudiantes_count?: number; // Conteo de estudiantes inscritos
   estado: "ACTIVA" | "CERRADA";
   created_at?: string;
   updated_at?: string;
@@ -25,15 +36,20 @@ type Paginated<T> = {
   last_page: number;
 };
 
-const API_BASE =
-  (import.meta as any).env?.VITE_API_BASE?.replace(/\/+$/, "") ||
-  "http://127.0.0.1:8000/api";
-
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE,
   withCredentials: false,
   timeout: 15000,
   headers: { Accept: "application/json" },
+});
+
+// Interceptor para agregar token de autenticación
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 // ---------- helpers ----------
@@ -175,4 +191,80 @@ export default {
   deleteSection,
   getCursos,
   getParalelos,
+  getSectionStudents,
+  duplicateSectionsYear,
 };
+
+// ---------- Nuevas funciones ----------
+
+/** Estudiante inscrito en una sección */
+export type SectionStudent = {
+  enrollment_id: number;
+  estado_matricula: string;
+  fecha_inscripcion?: string;
+  id: number;
+  codigo_estudiante: string;
+  nombres: string;
+  apellidos: string;
+  ci?: string;
+  email?: string;
+  telefono?: string;
+};
+
+/** Respuesta de estudiantes de una sección */
+export type SectionStudentsResponse = {
+  section: {
+    id: number;
+    curso: string;
+    paralelo: string;
+    capacidad: number | null;
+  };
+  total: number;
+  estudiantes: SectionStudent[];
+};
+
+/** Obtener estudiantes de una sección */
+export async function getSectionStudents(sectionId: number | string): Promise<SectionStudentsResponse> {
+  console.groupCollapsed("[sectionsApi] GET /sections/" + sectionId + "/students");
+  try {
+    const res = await api.get<SectionStudentsResponse>(`/sections/${sectionId}/students`);
+    console.log("✔ status", res.status, "total:", res.data?.total);
+    return res.data;
+  } catch (err) {
+    console.error("✖ error", err);
+    throw err;
+  } finally {
+    console.groupEnd();
+  }
+}
+
+/** Respuesta de duplicación de secciones */
+export type DuplicateYearResponse = {
+  message: string;
+  created: number;
+  skipped: number;
+  errors: string[];
+};
+
+/** Duplicar secciones de un año a otro */
+export async function duplicateSectionsYear(
+  sourceYear: string | number,
+  targetYear: string | number,
+  nivel?: NivelKey
+): Promise<DuplicateYearResponse> {
+  console.groupCollapsed("[sectionsApi] POST /sections/duplicate-year", { sourceYear, targetYear, nivel });
+  try {
+    const res = await api.post<DuplicateYearResponse>("/sections/duplicate-year", {
+      source_year: String(sourceYear),
+      target_year: String(targetYear),
+      nivel: nivel || null,
+    });
+    console.log("✔ status", res.status, "created:", res.data?.created);
+    return res.data;
+  } catch (err) {
+    console.error("✖ error", err);
+    throw err;
+  } finally {
+    console.groupEnd();
+  }
+}

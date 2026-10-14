@@ -1,5 +1,6 @@
 // src/components/gradebook/Gradebook.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -107,6 +108,10 @@ const DEFAULT_CATS: Record<TermId, { id: string; name: string; weight: number }[
 
 /** ===== Component ===== */
 export default function Gradebook({ initial, onSave }: Props) {
+  // Auth hook para verificar si es admin
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin' || user?.role === 'director_general' || user?.abilities?.includes('*');
+  
   // Merge defaults
 const mergedInit: GradebookData = {
   ...initial,
@@ -205,7 +210,8 @@ useEffect(() => {
     return n >= st && n <= en;
   }, [data.editWindow]);
   const isFlowEditable = (data.status ?? "draft") === "draft";
-  const canEdit = !data.locked && isFlowEditable && isInsideWindow;
+  // Admin siempre puede editar, otros usuarios dependen de ventana/estado
+  const canEdit = isAdmin || (!data.locked && isFlowEditable && isInsideWindow);
 
   /** Rounding */
   const applyRound = (n: number) => {
@@ -421,7 +427,8 @@ useEffect(() => {
   function setScore(studentId: string, colId: string, raw: string) {
     if (!canEdit) return;
     const col = data.columns.find((c) => c.id === colId);
-    if (col?.locked) return;
+    // Admin puede ignorar bloqueo de columna
+    if (col?.locked && !isAdmin) return;
 
     const n = Number(raw);
     if (Number.isNaN(n)) return;
@@ -439,7 +446,8 @@ useEffect(() => {
   function setQualiLevel(studentId: string, colId: string, code: string) {
     if (!canEdit) return;
     const col = data.columns.find((c) => c.id === colId);
-    if (col?.locked) return;
+    // Admin puede ignorar bloqueo de columna
+    if (col?.locked && !isAdmin) return;
 
     snapshot();
     setData((d) => {
@@ -871,7 +879,8 @@ useEffect(() => {
         const { sid, cid } = focusRef.current;
         if (!sid || !cid) return;
         const col = data.columns.find((c) => c.id === cid);
-        if (col?.locked) return;
+        // Admin puede ignorar bloqueo de columna
+        if (col?.locked && !isAdmin) return;
         snapshot();
         setData((d) => {
           const next = { ...d.grades };
@@ -883,7 +892,7 @@ useEffect(() => {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [data, canEdit]);
+  }, [data, canEdit, isAdmin]);
 
   /** Navegación por teclado (flechas, Tab/Shift+Tab, Enter) */
   function handleGridKey(e: React.KeyboardEvent<HTMLInputElement>, sid: string, cid: string) {

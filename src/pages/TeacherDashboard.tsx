@@ -1,6 +1,7 @@
 // src/pages/teacher/TeacherDashboard.tsx
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,7 @@ import {
   User,
 } from "lucide-react";
 import { syncGradebookQueue } from "@/services/gradebookApi";
+import { getMyTeacherProfile, getMyTeacherSections, type TeacherAssignedSection, type TeacherPortalProfile } from "@/services/teachersApi";
 import { useToast } from "@/hooks/use-toast";
 
 // Helpers para crear claves con scope por docente
@@ -72,13 +74,25 @@ const TeacherDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
 
-  // ⚠️ Ajusta estos dos si luego vienen de tu auth real:
-  const teacherDisplayName = "María López";
-  const teacherId = getTeacherId(teacherDisplayName);
+  const teacherDisplayName = [user?.teacher?.nombre, user?.teacher?.apellido].filter(Boolean).join(" ") || user?.name || "Docente";
+  const teacherId = String(user?.teacherId ?? user?.id ?? getTeacherId(teacherDisplayName));
+  const routeState = location.state as { nivel?: string; nivelLabel?: string } | null;
+  const requestedNivel = routeState?.nivel?.toLowerCase();
+  const validLevels = ["inicial", "primaria", "secundaria"];
 
-  // Nivel elegido (lo guarda SelectNivel/LevelEntries de forma scoped)
-  const [nivelLabel, setNivelLabel] = useState<string | null>(null);
+  // El nivel seleccionado se guarda en el espacio del docente autenticado.
+  const [nivel, setNivel] = useState<string | null>(
+    requestedNivel && validLevels.includes(requestedNivel)
+      ? requestedNivel
+      : scopedGet(teacherId, "nivel") || null
+  );
+  const nivelLabel = nivel ? nivel.charAt(0).toUpperCase() + nivel.slice(1) : null;
+  const [teacherProfile, setTeacherProfile] = useState<TeacherPortalProfile | null>(null);
+  const [assignedSections, setAssignedSections] = useState<TeacherAssignedSection[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [assignmentsError, setAssignmentsError] = useState<string | null>(null);
 
   const currentYear = new Date().getFullYear().toString();
   const [year, setYear] = useState<string>(
@@ -98,12 +112,53 @@ const TeacherDashboard = () => {
   }, [currentYear]);
   const termOptions = ["T1", "T2", "T3"];
 
-  // Cargar nivelLabel con scope; si no existe, intenta el global (compat)
+  // Aplicar una selección nueva enviada por SelectNivel.
   useEffect(() => {
-    const scoped = scopedGet(teacherId, "nivelLabel");
-    const fallback = typeof window !== "undefined" ? localStorage.getItem("nivelLabel") : null;
-    setNivelLabel((scoped as string) ?? (fallback as string) ?? null);
-  }, [teacherId]);
+    if (requestedNivel && validLevels.includes(requestedNivel)) setNivel(requestedNivel);
+  }, [requestedNivel]);
+
+  useEffect(() => {
+    if (!nivel) return;
+    scopedSet(teacherId, "nivel", nivel);
+    scopedSet(teacherId, "nivelLabel", nivelLabel || nivel);
+    localStorage.setItem("teacherId", teacherId);
+    localStorage.setItem("teacherName", teacherDisplayName);
+    localStorage.setItem("nivel", nivel);
+    localStorage.setItem("nivelLabel", nivelLabel || nivel);
+  }, [teacherId, teacherDisplayName, nivel, nivelLabel]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMyTeacherProfile(year)
+      .then((profile) => { if (!cancelled) setTeacherProfile(profile); })
+      .catch((error: unknown) => {
+        console.error("No se pudo cargar el perfil docente:", error);
+      });
+    return () => { cancelled = true; };
+  }, [year]);
+
+  useEffect(() => {
+    if (!nivel) {
+      setAssignedSections([]);
+      return;
+    }
+
+    let cancelled = false;
+    setAssignmentsLoading(true);
+    setAssignmentsError(null);
+    getMyTeacherSections(year, nivel)
+      .then((response) => {
+        if (!cancelled) setAssignedSections(response.data || []);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const err = error as { response?: { data?: { message?: string } }; message?: string };
+        setAssignedSections([]);
+        setAssignmentsError(err.response?.data?.message || err.message || "No se pudieron cargar tus cursos asignados.");
+      })
+      .finally(() => { if (!cancelled) setAssignmentsLoading(false); });
+    return () => { cancelled = true; };
+  }, [year, nivel]);
 
   // Persistir selecciones (scope docente)
   useEffect(() => {
@@ -157,6 +212,11 @@ const TeacherDashboard = () => {
       setSyncing(false);
     }
   };
+
+  const assignedSubjectCount = assignedSections.reduce((count, section) => count + section.assignments.length, 0);
+  const assignedSectionsCount = assignedSections.length;
+  const hasAssignedCourses = assignedSectionsCount > 0 && assignedSubjectCount > 0;
+  const sectionTitle = (section: TeacherAssignedSection) => `${section.curso}° ${section.paralelo ? `“${section.paralelo}”` : ""}`.trim();
 
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(path + "/");
@@ -233,7 +293,7 @@ const TeacherDashboard = () => {
     <DashboardLayout
       userType="teacher"
       userName={teacherDisplayName}
-      userInfo={`Docente de Matemática${nivelLabel ? ` • Nivel: ${nivelLabel}` : ""}`}
+      userInfo={`${teacherProfile?.especialidad || "Docente"}${nivelLabel ? ` • Nivel: ${nivelLabel}` : ""}`}
       sidebarContent={sidebarContent}
     >
       <div className="space-y-6">
@@ -326,8 +386,8 @@ const TeacherDashboard = () => {
           </div>
         </div>
 
-        {/* Aviso si no hay nivel seleccionado */}
-        {!nivelLabel && (
+        {/* Elegir nivel si no hay contexto seleccionado */}
+        {!nivel && (
           <Card className="border-dashed">
             <CardHeader>
               <CardTitle>Selecciona un nivel para continuar</CardTitle>
@@ -343,23 +403,55 @@ const TeacherDashboard = () => {
           </Card>
         )}
 
-        {/* Subpáginas renderizadas aquí */}
-        <Outlet />
+        {nivel && assignmentsLoading && (
+          <Card><CardContent className="flex items-center gap-3 py-8 text-muted-foreground"><RefreshCw className="h-5 w-5 animate-spin" />Cargando cursos y materias asignadas para {nivelLabel}…</CardContent></Card>
+        )}
 
-        {/* Bienvenida si estamos exactamente en /dashboard/teacher */}
-        {location.pathname === "/dashboard/teacher" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Bienvenido</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">
-                Usa el menú lateral para gestionar tus clases, calificaciones, tareas,
-                planificación, <strong>horario</strong> y reportes. Los filtros de{" "}
-                <strong>Año</strong> y <strong>Trimestre</strong> quedan guardados para tu usuario.
-              </p>
+        {nivel && !assignmentsLoading && assignmentsError && (
+          <Card className="border-destructive/40"><CardHeader><CardTitle className="flex items-center gap-2"><CloudOff className="h-5 w-5" />No se pudieron cargar tus asignaciones</CardTitle></CardHeader><CardContent className="text-muted-foreground">{assignmentsError}</CardContent></Card>
+        )}
+
+        {nivel && !assignmentsLoading && !assignmentsError && !hasAssignedCourses && (
+          <Card className="border-amber-300 bg-amber-50/50">
+            <CardHeader><CardTitle className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-amber-600" />Sin cursos asignados para {nivelLabel}</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-muted-foreground">No tienes cursos ni materias asignados en este nivel para el año {year}. El administrador debe asignarte secciones y materias antes de que puedas ingresar a sus módulos.</p>
+              <Button variant="outline" onClick={() => navigate("/seleccionar-nivel")}>Cambiar nivel</Button>
             </CardContent>
           </Card>
+        )}
+
+        {nivel && !assignmentsLoading && !assignmentsError && hasAssignedCourses && (
+          <>
+            {location.pathname === "/dashboard/teacher" && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Nivel</p><p className="text-2xl font-bold">{nivelLabel}</p></CardContent></Card>
+                  <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Cursos asignados</p><p className="text-2xl font-bold">{assignedSectionsCount}</p></CardContent></Card>
+                  <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Materias asignadas</p><p className="text-2xl font-bold">{assignedSubjectCount}</p></CardContent></Card>
+                </div>
+                <Card>
+                  <CardHeader><CardTitle>Mis cursos de {nivelLabel}</CardTitle></CardHeader>
+                  <CardContent className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {assignedSections.map((section) => (
+                      <Card key={section.id} className="border">
+                        <CardHeader className="pb-2"><CardTitle className="text-base">{sectionTitle(section)}</CardTitle></CardHeader>
+                        <CardContent className="space-y-2">
+                          <p className="text-xs text-muted-foreground">{section.turno || "Turno no indicado"}{section.aula ? ` · Aula ${section.aula}` : ""}</p>
+                          <div className="flex flex-wrap gap-1">
+                            {section.assignments.map((assignment) => (
+                              <Badge key={assignment.id} variant="secondary">{assignment.subject?.nombre || "Materia"}</Badge>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </CardContent>
+                </Card>
+              </>
+            )}
+            <Outlet context={{ teacher: teacherProfile, nivel, year, sections: assignedSections }} />
+          </>
         )}
       </div>
     </DashboardLayout>

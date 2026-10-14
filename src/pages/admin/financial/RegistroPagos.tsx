@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardHeader,
@@ -45,59 +45,211 @@ import {
   RefreshCw,
   FileText,
   Search,
+  Loader2,
+  Receipt,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import {
+  getFinanceSummary,
+  registerPayment,
+  cancelPayment,
+  getPaymentReceipt,
+  getFeeConfigs,
+  downloadBlob,
+  formatCurrency,
+  getPaymentMethodLabel,
+  type FinanceSummary,
+  type Payment,
+  type PaymentMethod,
+  type FeeConfig,
+} from "@/services/finanzasApi";
 
 // RFs cubiertos: RF-004, RF-005, RF-006
 export default function RegistroPagos() {
-  const [pagos] = useState([
-    {
-      id: "P-001",
-      estudiante: "Ana Pérez",
-      monto: 400,
-      metodo: "Efectivo",
-      fecha: "2025-02-10",
-      tipo: "Mensual",
-      estado: "verificado",
-      comprobante: true,
-    },
-    {
-      id: "P-002",
-      estudiante: "Juan Gómez",
-      monto: 200,
-      metodo: "Transferencia",
-      fecha: "2025-02-12",
-      tipo: "Parcial",
-      estado: "pendiente",
-      comprobante: true,
-    },
-    {
-      id: "P-003",
-      estudiante: "María López",
-      monto: 4000,
-      metodo: "Transferencia",
-      fecha: "2025-02-15",
-      tipo: "Anual",
-      estado: "verificado",
-      comprobante: true,
-    },
-  ]);
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<FinanceSummary | null>(null);
+  const [feeConfigs, setFeeConfigs] = useState<FeeConfig[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const [conciliacion] = useState([
-    {
-      fecha: "2025-02-10",
-      referencia: "TRF-001",
-      monto: 400,
-      estado: "conciliado",
-      origen: "Banco XYZ",
-    },
-    {
-      fecha: "2025-02-12",
-      referencia: "TRF-002",
-      monto: 200,
-      estado: "pendiente",
-      origen: "Banco ABC",
-    },
-  ]);
+  // Form states
+  const [selectedAccountId, setSelectedAccountId] = useState<string>("");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
+
+  // Lista de pagos recientes (de las cuentas cargadas)
+  const [recentPayments, setRecentPayments] = useState<Array<{
+    id: number;
+    student_name: string;
+    amount: number;
+    method: PaymentMethod;
+    date: string;
+    receipt: string;
+    status: string;
+  }>>([]);
+
+  useEffect(() => {
+    // Verificar que hay token antes de hacer peticiones
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      console.log('[RegistroPagos] Esperando autenticación...');
+      setLoading(false);
+      return;
+    }
+    
+    const timer = setTimeout(() => {
+      loadData();
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadData() {
+    // Doble verificación de token
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    
+    try {
+      setLoading(true);
+      const [summaryData, configs] = await Promise.all([
+        getFinanceSummary(),
+        getFeeConfigs().catch(() => []),
+      ]);
+      setSummary(summaryData);
+      setFeeConfigs(configs);
+    } catch (error) {
+      console.error("Error cargando datos:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No se pudieron cargar los datos financieros",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRegisterPayment() {
+    if (!selectedAccountId || !paymentAmount || !paymentMethod) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Por favor complete todos los campos obligatorios",
+      });
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      const response = await registerPayment({
+        student_account_id: parseInt(selectedAccountId),
+        amount: parseFloat(paymentAmount),
+        payment_method: paymentMethod,
+        reference: paymentReference || undefined,
+        notes: paymentNotes || undefined,
+      });
+
+      toast({
+        title: "Pago registrado",
+        description: `Recibo: ${response.payment.receipt_number}`,
+      });
+
+      // Agregar a la lista de pagos recientes
+      const cuenta = summary?.cuentas.find(
+        (c) => c.student_id === parseInt(selectedAccountId)
+      );
+      if (cuenta) {
+        setRecentPayments((prev) => [
+          {
+            id: response.payment.id,
+            student_name: cuenta.student_name,
+            amount: response.payment.amount,
+            method: response.payment.payment_method,
+            date: response.payment.payment_date,
+            receipt: response.payment.receipt_number,
+            status: "verificado",
+          },
+          ...prev,
+        ]);
+      }
+
+      // Resetear formulario
+      setDialogOpen(false);
+      setSelectedAccountId("");
+      setPaymentAmount("");
+      setPaymentMethod("");
+      setPaymentReference("");
+      setPaymentNotes("");
+
+      // Recargar datos
+      loadData();
+    } catch (error: unknown) {
+      console.error("Error registrando pago:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description:
+          error instanceof Error ? error.message : "No se pudo registrar el pago",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDownloadReceipt(paymentId: number, receiptNumber: string) {
+    try {
+      const blob = await getPaymentReceipt(paymentId);
+      downloadBlob(blob, `recibo_${receiptNumber}.pdf`);
+      toast({
+        title: "Recibo descargado",
+        description: `${receiptNumber}.pdf`,
+      });
+    } catch (error) {
+      console.error("Error descargando recibo:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No se pudo descargar el recibo",
+      });
+    }
+  }
+
+  async function handleCancelPayment(paymentId: number) {
+    if (!confirm("¿Está seguro de anular este pago?")) return;
+
+    try {
+      await cancelPayment(paymentId);
+      toast({
+        title: "Pago anulado",
+        description: "El pago ha sido anulado correctamente",
+      });
+      setRecentPayments((prev) =>
+        prev.map((p) =>
+          p.id === paymentId ? { ...p, status: "anulado" } : p
+        )
+      );
+      loadData();
+    } catch (error) {
+      console.error("Error anulando pago:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No se pudo anular el pago",
+      });
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <span className="ml-2">Cargando datos financieros...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -108,7 +260,7 @@ export default function RegistroPagos() {
             Registre y gestione todos los pagos del sistema
           </p>
         </div>
-        <Dialog>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <PlusCircle className="mr-2 h-4 w-4" />
@@ -124,69 +276,149 @@ export default function RegistroPagos() {
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="estudiante">Estudiante *</Label>
-                <Select>
+                <Label htmlFor="estudiante">Cuenta del Estudiante *</Label>
+                <Select
+                  value={selectedAccountId}
+                  onValueChange={setSelectedAccountId}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="Seleccione estudiante" />
+                    <SelectValue placeholder="Seleccione cuenta" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ana">Ana Pérez</SelectItem>
-                    <SelectItem value="juan">Juan Gómez</SelectItem>
-                    <SelectItem value="maria">María López</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="tipo">Tipo de Pago *</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccione tipo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="mensual">Mensual (400 Bs)</SelectItem>
-                    <SelectItem value="anual">Anual (con descuento)</SelectItem>
-                    <SelectItem value="parcial">Pago Parcial</SelectItem>
-                    <SelectItem value="matricula">Matrícula</SelectItem>
+                    {summary?.cuentas.map((cuenta) => (
+                      <SelectItem
+                        key={cuenta.student_id}
+                        value={cuenta.student_id.toString()}
+                      >
+                        {cuenta.student_name} - Saldo: {formatCurrency(cuenta.saldo_pendiente)}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="monto">Monto (Bs) *</Label>
-                <Input id="monto" type="number" placeholder="0.00" />
+                <Input
+                  id="monto"
+                  type="number"
+                  placeholder="0.00"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="metodo">Método de Pago *</Label>
-                <Select>
+                <Select
+                  value={paymentMethod}
+                  onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccione método" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="efectivo">Efectivo</SelectItem>
-                    <SelectItem value="transferencia">Transferencia</SelectItem>
-                    <SelectItem value="qr">Pago QR</SelectItem>
+                    <SelectItem value="EFECTIVO">Efectivo</SelectItem>
+                    <SelectItem value="TRANSFERENCIA">Transferencia</SelectItem>
+                    <SelectItem value="QR">Pago QR</SelectItem>
+                    <SelectItem value="TARJETA">Tarjeta</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>Comprobante</Label>
-                <Button variant="outline" className="w-full">
-                  <FileUp className="mr-2 h-4 w-4" />
-                  Subir Comprobante
-                </Button>
+                <Label htmlFor="referencia">Referencia/Nro. Transferencia</Label>
+                <Input
+                  id="referencia"
+                  placeholder="Opcional"
+                  value={paymentReference}
+                  onChange={(e) => setPaymentReference(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="notas">Notas</Label>
+                <Input
+                  id="notas"
+                  placeholder="Notas adicionales"
+                  value={paymentNotes}
+                  onChange={(e) => setPaymentNotes(e.target.value)}
+                />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline">Cancelar</Button>
-              <Button>Registrar Pago</Button>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleRegisterPayment} disabled={submitting}>
+                {submitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Procesando...
+                  </>
+                ) : (
+                  "Registrar Pago"
+                )}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
+      {/* Tarjetas de resumen */}
+      {summary && (
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Total Recaudado
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">
+                {formatCurrency(summary.resumen_financiero.total_pagado)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Pendiente
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-yellow-600">
+                {formatCurrency(summary.resumen_financiero.total_pendiente)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                % Recaudación
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {summary.resumen_financiero.porcentaje_recaudado}%
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Estudiantes en Mora
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-600">
+                {summary.resumen_estados.en_mora}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <Tabs defaultValue="registro" className="w-full">
         <TabsList>
           <TabsTrigger value="registro">Registro de Pagos</TabsTrigger>
-          <TabsTrigger value="conciliacion">Conciliación</TabsTrigger>
+          <TabsTrigger value="cuentas">Cuentas de Estudiantes</TabsTrigger>
           <TabsTrigger value="configuracion">Configuración</TabsTrigger>
         </TabsList>
 
@@ -196,134 +428,151 @@ export default function RegistroPagos() {
             <CardHeader>
               <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle>Transacciones Registradas</CardTitle>
+                  <CardTitle>Pagos Registrados</CardTitle>
                   <CardDescription>
                     Lista de todos los pagos registrados en el sistema
                   </CardDescription>
                 </div>
-                <Input
-                  placeholder="Buscar transacción..."
-                  className="max-w-xs"
-                  type="search"
-                />
+                <Button variant="outline" onClick={loadData}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Actualizar
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Estudiante</TableHead>
-                      <TableHead>Monto</TableHead>
-                      <TableHead>Método</TableHead>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Comprobante</TableHead>
-                      <TableHead>Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {pagos.map((p) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-mono">{p.id}</TableCell>
-                        <TableCell>{p.estudiante}</TableCell>
-                        <TableCell>{p.monto} Bs</TableCell>
-                        <TableCell>{p.metodo}</TableCell>
-                        <TableCell>{p.fecha}</TableCell>
-                        <TableCell>{p.tipo}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              p.estado === "verificado" ? "default" : "secondary"
-                            }
-                          >
-                            {p.estado}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {p.comprobante ? (
-                            <Check className="h-4 w-4 text-green-500" />
-                          ) : (
-                            <X className="h-4 w-4 text-red-500" />
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Button variant="ghost" size="icon">
-                              <Search className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon">
-                              <FileText className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
+              {recentPayments.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Receipt className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No hay pagos registrados en esta sesión</p>
+                  <p className="text-sm">
+                    Los pagos registrados aparecerán aquí
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>ID</TableHead>
+                        <TableHead>Estudiante</TableHead>
+                        <TableHead>Monto</TableHead>
+                        <TableHead>Método</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Recibo</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Acciones</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {recentPayments.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-mono">#{p.id}</TableCell>
+                          <TableCell>{p.student_name}</TableCell>
+                          <TableCell>{formatCurrency(p.amount)}</TableCell>
+                          <TableCell>{getPaymentMethodLabel(p.method)}</TableCell>
+                          <TableCell>{p.date}</TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {p.receipt}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                p.status === "verificado"
+                                  ? "default"
+                                  : p.status === "anulado"
+                                  ? "destructive"
+                                  : "secondary"
+                              }
+                            >
+                              {p.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() =>
+                                  handleDownloadReceipt(p.id, p.receipt)
+                                }
+                                title="Descargar recibo"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                              {p.status !== "anulado" && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleCancelPayment(p.id)}
+                                  title="Anular pago"
+                                >
+                                  <X className="h-4 w-4 text-red-500" />
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* RF-006: Conciliación Bancaria */}
-        <TabsContent value="conciliacion">
+        {/* Cuentas de Estudiantes */}
+        <TabsContent value="cuentas">
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
-                  <CardTitle>Conciliación Bancaria</CardTitle>
-                  <CardDescription>
-                    Concilie pagos con estados de cuenta bancarios
-                  </CardDescription>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline">
-                    <FileUp className="mr-2 h-4 w-4" />
-                    Importar Estado
-                  </Button>
-                  <Button variant="outline">
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Auto-Conciliar
-                  </Button>
-                </div>
-              </div>
+              <CardTitle>Cuentas de Estudiantes</CardTitle>
+              <CardDescription>
+                Estado de cuenta de todos los estudiantes
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Referencia</TableHead>
-                      <TableHead>Monto</TableHead>
+                      <TableHead>Estudiante</TableHead>
+                      <TableHead className="text-right">Total Deuda</TableHead>
+                      <TableHead className="text-right">Pagado</TableHead>
+                      <TableHead className="text-right">Saldo</TableHead>
                       <TableHead>Estado</TableHead>
-                      <TableHead>Origen</TableHead>
-                      <TableHead>Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {conciliacion.map((c, i) => (
-                      <TableRow key={i}>
-                        <TableCell>{c.fecha}</TableCell>
-                        <TableCell className="font-mono">{c.referencia}</TableCell>
-                        <TableCell>{c.monto} Bs</TableCell>
+                    {summary?.cuentas.map((cuenta) => (
+                      <TableRow key={cuenta.student_id}>
+                        <TableCell className="font-medium">
+                          {cuenta.student_name}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(cuenta.total_debt)}
+                        </TableCell>
+                        <TableCell className="text-right text-green-600">
+                          {formatCurrency(cuenta.total_paid)}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">
+                          {formatCurrency(cuenta.saldo_pendiente)}
+                        </TableCell>
                         <TableCell>
                           <Badge
                             variant={
-                              c.estado === "conciliado" ? "default" : "secondary"
+                              cuenta.status === "AL_DIA"
+                                ? "default"
+                                : cuenta.status === "MORA"
+                                ? "destructive"
+                                : "secondary"
                             }
                           >
-                            {c.estado}
+                            {cuenta.status === "AL_DIA"
+                              ? "Al día"
+                              : cuenta.status === "MORA"
+                              ? "En mora"
+                              : "Pendiente"}
                           </Badge>
-                        </TableCell>
-                        <TableCell>{c.origen}</TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="sm">
-                            Vincular
-                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -334,49 +583,42 @@ export default function RegistroPagos() {
           </Card>
         </TabsContent>
 
-        {/* RF-005: Tipos de Pago y Configuración */}
+        {/* RF-005: Configuración */}
         <TabsContent value="configuracion">
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Tipos de Pago</CardTitle>
+                <CardTitle>Configuraciones de Cobro</CardTitle>
                 <CardDescription>
-                  Configure los tipos de pago disponibles
+                  Tipos de cobro definidos en el sistema
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center p-4 border rounded-lg">
-                    <div>
-                      <h4 className="font-semibold">Pago Mensual</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Mensualidad estándar
-                      </p>
-                    </div>
-                    <Badge>400 Bs</Badge>
-                  </div>
-                  <div className="flex justify-between items-center p-4 border rounded-lg">
-                    <div>
-                      <h4 className="font-semibold">Pago Anual</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Con 15% descuento
-                      </p>
-                    </div>
-                    <Badge variant="secondary">3,400 Bs</Badge>
-                  </div>
-                  <div className="flex justify-between items-center p-4 border rounded-lg">
-                    <div>
-                      <h4 className="font-semibold">Pago Parcial</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Mínimo 50% del total
-                      </p>
-                    </div>
-                    <Badge variant="outline">Variable</Badge>
-                  </div>
-                  <Button className="w-full">
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Agregar Tipo
-                  </Button>
+                  {feeConfigs.length === 0 ? (
+                    <p className="text-muted-foreground text-center py-4">
+                      No hay configuraciones de cobro
+                    </p>
+                  ) : (
+                    feeConfigs.map((config) => (
+                      <div
+                        key={config.id}
+                        className="flex justify-between items-center p-4 border rounded-lg"
+                      >
+                        <div>
+                          <h4 className="font-semibold">{config.concepto}</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {config.nivel}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={config.activo ? "default" : "secondary"}
+                        >
+                          {formatCurrency(config.monto)}
+                        </Badge>
+                      </div>
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -385,48 +627,47 @@ export default function RegistroPagos() {
               <CardHeader>
                 <CardTitle>Métodos de Pago</CardTitle>
                 <CardDescription>
-                  Gestione los métodos de pago aceptados
+                  Métodos de pago aceptados
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   <div className="flex justify-between items-center p-4 border rounded-lg">
-                    <div className="flex items-center gap-4">
-                      <div>
-                        <h4 className="font-semibold">Efectivo</h4>
-                        <p className="text-sm text-muted-foreground">
-                          Pago en ventanilla
-                        </p>
-                      </div>
+                    <div>
+                      <h4 className="font-semibold">Efectivo</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Pago en ventanilla
+                      </p>
                     </div>
                     <Badge variant="outline">Activo</Badge>
                   </div>
                   <div className="flex justify-between items-center p-4 border rounded-lg">
-                    <div className="flex items-center gap-4">
-                      <div>
-                        <h4 className="font-semibold">Transferencia</h4>
-                        <p className="text-sm text-muted-foreground">
-                          Banco XYZ - Cta: 1234567
-                        </p>
-                      </div>
+                    <div>
+                      <h4 className="font-semibold">Transferencia</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Depósito bancario
+                      </p>
                     </div>
                     <Badge variant="outline">Activo</Badge>
                   </div>
                   <div className="flex justify-between items-center p-4 border rounded-lg">
-                    <div className="flex items-center gap-4">
-                      <div>
-                        <h4 className="font-semibold">QR</h4>
-                        <p className="text-sm text-muted-foreground">
-                          Pago con código QR
-                        </p>
-                      </div>
+                    <div>
+                      <h4 className="font-semibold">QR</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Pago con código QR
+                      </p>
                     </div>
-                    <Badge variant="secondary">Inactivo</Badge>
+                    <Badge variant="outline">Activo</Badge>
                   </div>
-                  <Button className="w-full">
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Agregar Método
-                  </Button>
+                  <div className="flex justify-between items-center p-4 border rounded-lg">
+                    <div>
+                      <h4 className="font-semibold">Tarjeta</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Débito/Crédito
+                      </p>
+                    </div>
+                    <Badge variant="outline">Activo</Badge>
+                  </div>
                 </div>
               </CardContent>
             </Card>

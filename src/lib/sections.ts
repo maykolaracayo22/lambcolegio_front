@@ -1,15 +1,29 @@
 // src/lib/sections.ts
 // Modelo de Secciones (Paralelos) alineado a Bolivia (Regular)
+// Re-exporta desde el catálogo unificado para compatibilidad
 
-export const niveles = ["inicial", "primaria", "secundaria"] as const;
-export type NivelKey = typeof niveles[number];
-export type Turno = "Mañana" | "Tarde" | "Noche";
+import {
+  NIVELES,
+  CURSOS_INICIAL,
+  CURSOS_PRIMARIA,
+  CURSOS_SECUNDARIA,
+  CURSOS_POR_NIVEL,
+  PARALELOS,
+  TURNOS,
+  type NivelKey as NivelKeyBase,
+  type Turno as TurnoBase,
+} from "@/lib/catalogo-bolivia";
+
+// Re-exportar tipos para compatibilidad
+export const niveles = NIVELES;
+export type NivelKey = NivelKeyBase;
+export type Turno = TurnoBase;
 
 export type Section = {
   id: string;
   year: string;              // Año de gestión (p.ej. "2025")
   nivel: NivelKey;           // inicial | primaria | secundaria
-  curso: string;             // "1ro Inicial", "4to Primaria", "3ro Secundaria"
+  curso: string;             // "1ra Sección", "4to Primaria", "3ro Secundaria"
   paralelo: string;          // A, B, C...
   turno: Turno;
   aula?: string;
@@ -22,14 +36,10 @@ export type Section = {
 // Storage
 const STORAGE = "adm:sections";
 
-// Catálogos (Regular)
-export const cursosInicial = ["1ro Inicial", "2do Inicial"];
-export const cursosPrimaria = [
-  "1ro Primaria","2do Primaria","3ro Primaria","4to Primaria","5to Primaria","6to Primaria",
-];
-export const cursosSecundaria = [
-  "1ro Secundaria","2do Secundaria","3ro Secundaria","4to Secundaria","5to Secundaria","6to Secundaria",
-];
+// Catálogos (desde catálogo unificado Bolivia)
+export const cursosInicial = [...CURSOS_INICIAL];
+export const cursosPrimaria = [...CURSOS_PRIMARIA];
+export const cursosSecundaria = [...CURSOS_SECUNDARIA];
 
 export const cursosPorNivel: Record<NivelKey, string[]> = {
   inicial: cursosInicial,
@@ -37,8 +47,8 @@ export const cursosPorNivel: Record<NivelKey, string[]> = {
   secundaria: cursosSecundaria,
 };
 
-export const paralelosSugeridos = ["A","B","C","D","E","F"];
-export const turnos: Turno[] = ["Mañana","Tarde","Noche"];
+export const paralelosSugeridos = [...PARALELOS];
+export const turnos: Turno[] = [...TURNOS];
 
 // Helpers
 export function getSections(): Section[] {

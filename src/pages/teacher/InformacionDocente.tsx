@@ -1,6 +1,8 @@
 // src/pages/teacher/InformacionDocente.jsx
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { getMyTeacherProfile, getMyTeacherSections, getMyTeacherSectionStudents } from '@/services/teachersApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   User, 
@@ -31,7 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 // --- Datos específicos para Bolivia ---
 const ENTIDADES = ['UEP Técnico Humanístico Ebenezer'];
 const NIVELES = ['Inicial', 'Primaria', 'Secundaria'];
-const ANIOS = ['2025', '2024', '2023'];
+const ANIOS = Array.from(new Set([String(new Date().getFullYear()), '2025', '2024', '2023']));
 const TRIMESTRES = ['T1', 'T2', 'T3'];
 const TURNOS = ['Mañana', 'Tarde', 'Noche'];
 
@@ -74,37 +76,39 @@ const CURSOS = {
   ],
 };
 
-// Datos mock del docente adaptado a Bolivia
+// Valores para datos que la institución aún no registra en el sistema.
 const DOCENTE_BASE = {
-  nombres: 'María Elena',
-  apellidos: 'García Rodríguez',
-  codigo: 'DOC-2024-001',
-  ci: '87654321',
-  telefono: '+591 76543210',
-  correo: 'maria.garcia@uepthe.edu.bo',
-  direccion: 'Av. Educación 123, Juliaca - Puno',
-  especialidad: 'Educación Primaria',
-  titulo: 'Licenciada en Educación',
-  añosExperiencia: 8,
-  fechaIngreso: '15/03/2018',
-  estado: 'Activo',
-  tipoContrato: 'Contratado',
-  nro_rda: 'RDA-2024-001',
-  estado_rda: 'VIGENTE',
-  foto: 'https://via.placeholder.com/150',
-  cursosAsignados: ['Lenguaje y Comunicación', 'Matemática'],
-  horario: '07:30 AM - 01:30 PM',
-  turno: 'Mañana',
-  departamento: 'Primaria'
+  nombres: '',
+  apellidos: '',
+  codigo: '',
+  ci: '',
+  telefono: '',
+  correo: '',
+  direccion: 'No registrado',
+  especialidad: 'No registrada',
+  titulo: 'No registrado',
+  añosExperiencia: 'No registrado',
+  fechaIngreso: 'No registrada',
+  estado: 'No disponible',
+  tipoContrato: 'No registrado',
+  nro_rda: 'No registrado',
+  estado_rda: 'No disponible',
+  foto: '',
+  cursosAsignados: [],
+  horario: 'No registrado',
+  turno: 'No registrado',
+  departamento: 'No registrado'
 };
 
 export default function InformacionDocente() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const currentYear = String(new Date().getFullYear());
 
   // --- estado de filtros ---
   const [entidad, setEntidad] = useState(ENTIDADES[0]);
-  const [nivel, setNivel] = useState('Primaria');
-  const [anio, setAnio] = useState('2025');
+  const [nivel, setNivel] = useState(() => localStorage.getItem('nivelLabel') || 'Primaria');
+  const [anio, setAnio] = useState(currentYear);
   const [trimestre, setTrimestre] = useState('T1');
   const [turno, setTurno] = useState('Mañana');
 
@@ -128,16 +132,87 @@ export default function InformacionDocente() {
   }, [nivel]);
 
   // --- estado del docente ---
-  const [docente, setDocente] = useState(DOCENTE_BASE);
+  const [docente, setDocente] = useState({
+    ...DOCENTE_BASE,
+    nombres: user?.teacher?.nombre || user?.name?.split(' ')[0] || '',
+    apellidos: user?.teacher?.apellido || user?.name?.split(' ').slice(1).join(' ') || '',
+    correo: user?.email || '',
+    codigo: user?.teacherId ? `DOC-${user.teacherId}` : '',
+  });
+  const [estadisticas, setEstadisticas] = useState({
+    totalEstudiantes: 0,
+    seccionesActivas: 0,
+    materiasAsignadas: 0,
+    asignacionesActivas: 0,
+  });
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const nivelSlug = nivel.toLowerCase();
+    setProfileLoading(true);
+    setProfileError(null);
+    Promise.all([
+      getMyTeacherProfile(anio),
+      getMyTeacherSections(anio, nivelSlug),
+    ])
+      .then(async ([profile, response]) => {
+        if (cancelled) return;
+        const sections = response.data || [];
+        const assignedSubjects = Array.from(new Set(
+          sections.flatMap((section) => section.assignments.map((assignment) => assignment.subject?.nombre).filter((name): name is string => Boolean(name)))
+        ));
+        const studentLists = await Promise.all(
+          sections.map((section) => getMyTeacherSectionStudents(section.id).catch(() => []))
+        );
+        if (cancelled) return;
+        const studentIds = new Set(studentLists.flat().map((student) => student.id));
+        const scheduleItems = sections.flatMap((section) => section.assignments)
+          .filter((assignment) => assignment.dia && assignment.inicio && assignment.fin);
+
+        setEstadisticas({
+          totalEstudiantes: studentIds.size,
+          seccionesActivas: sections.length,
+          materiasAsignadas: assignedSubjects.length,
+          asignacionesActivas: profile.assignments_count || 0,
+        });
+        setDocente((current) => ({
+          ...current,
+          nombres: profile.nombres,
+          apellidos: profile.apellidos,
+          codigo: `DOC-${profile.id}`,
+          ci: profile.ci || 'No registrado',
+          telefono: profile.telefono || 'No registrado',
+          correo: profile.email,
+          especialidad: profile.especialidad || 'No registrada',
+          titulo: profile.nivel_formacion || 'No registrado',
+          estado: profile.estado || 'No disponible',
+          nro_rda: profile.rda_numero || 'No registrado',
+          estado_rda: profile.rda_estado || 'No disponible',
+          fechaIngreso: profile.fecha_ingreso || [profile.mes_ingreso, profile.anio_ingreso].filter(Boolean).join('/') || 'No registrada',
+          turno: profile.turno || sections.find((section) => section.turno)?.turno || 'No registrado',
+          horario: scheduleItems.length
+            ? `${scheduleItems.length} bloque(s) asignado(s)`
+            : 'Sin horario asignado',
+          cursosAsignados: assignedSubjects,
+        }));
+      })
+      .catch((error) => {
+        console.error('No se pudo cargar la información del docente:', error);
+        if (!cancelled) {
+          setProfileError(error.response?.data?.message || 'No se pudo cargar el perfil del docente. Verifica tu sesión e intenta actualizar.');
+        }
+      })
+      .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, [anio, nivel]);
 
   // --- acciones ---
   const filtrar = () => {
-    // Aquí podrías llamar a tu backend con los filtros
-    // Simulamos actualización del docente
-    setDocente((prev) => ({ 
-      ...prev,
-      cursosAsignados: [curso, ...cursosDisponibles.slice(0, 1)] // Mock de cursos asignados
-    }));
+    if (docente.cursosAsignados.length === 0) {
+      alert(`No tienes cursos asignados para el nivel ${nivel} en ${anio}.`);
+    }
   };
 
   const exportarPDF = () => {
@@ -198,16 +273,13 @@ ${entidad} • ${nivel} • ${grado} ${seccion} • ${anio} ${trimestre} • ${t
     window.location.href = `mailto:administracion@uepthe.edu.bo?subject=Consulta%20Docente%20${encodeURIComponent(docente.codigo)}`;
   };
 
-  // Estadísticas mock del docente
-  const estadisticas = {
-    totalEstudiantes: 35,
-    promedioAsistencia: 92.5,
-    cursosActivos: docente.cursosAsignados.length,
-    evaluacionesPendientes: 3
-  };
-
   return (
     <div className="space-y-6">
+      {profileError && (
+        <Card className="border-destructive/40">
+          <CardContent className="p-4 text-sm text-destructive">{profileError}</CardContent>
+        </Card>
+      )}
       {/* Sección de Filtros */}
       <Card className="bg-white p-4 rounded-lg shadow-sm">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4 items-end">
@@ -387,8 +459,8 @@ ${entidad} • ${nivel} • ${grado} ${seccion} • ${anio} ${trimestre} • ${t
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-green-600">Asistencia Promedio</p>
-                <p className="text-2xl font-bold text-green-800">{estadisticas.promedioAsistencia}%</p>
+                <p className="text-sm font-medium text-green-600">Secciones Activas</p>
+                <p className="text-2xl font-bold text-green-800">{estadisticas.seccionesActivas}</p>
               </div>
               <Clock className="h-8 w-8 text-green-500" />
             </div>
@@ -399,8 +471,8 @@ ${entidad} • ${nivel} • ${grado} ${seccion} • ${anio} ${trimestre} • ${t
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-purple-600">Cursos Activos</p>
-                <p className="text-2xl font-bold text-purple-800">{estadisticas.cursosActivos}</p>
+                <p className="text-sm font-medium text-purple-600">Materias Asignadas</p>
+                <p className="text-2xl font-bold text-purple-800">{estadisticas.materiasAsignadas}</p>
               </div>
               <BookOpen className="h-8 w-8 text-purple-500" />
             </div>
@@ -411,8 +483,8 @@ ${entidad} • ${nivel} • ${grado} ${seccion} • ${anio} ${trimestre} • ${t
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-orange-600">Evaluaciones Pendientes</p>
-                <p className="text-2xl font-bold text-orange-800">{estadisticas.evaluacionesPendientes}</p>
+                <p className="text-sm font-medium text-orange-600">Asignaciones Activas</p>
+                <p className="text-2xl font-bold text-orange-800">{estadisticas.asignacionesActivas}</p>
               </div>
               <FileText className="h-8 w-8 text-orange-500" />
             </div>
@@ -433,13 +505,11 @@ ${entidad} • ${nivel} • ${grado} ${seccion} • ${anio} ${trimestre} • ${t
           <CardContent className="pt-6">
             <div className="space-y-4">
               <div className="flex items-center space-x-4">
-                <img
-                  src={docente.foto}
-                  alt="Foto del Docente"
-                  className="w-20 h-20 rounded-full border-2 border-primary object-cover"
-                />
+                <div className="w-20 h-20 rounded-full border-2 border-primary bg-primary/10 flex items-center justify-center">
+                  <User className="h-10 w-10 text-primary" aria-label="Sin foto registrada" />
+                </div>
                 <div className="space-y-1">
-                  <h3 className="text-lg font-bold text-foreground">{docente.nombres} {docente.apellidos}</h3>
+                  <h3 className="text-lg font-bold text-foreground">{profileLoading ? 'Cargando perfil…' : `${docente.nombres} ${docente.apellidos}`}</h3>
                   <p className="text-sm text-muted-foreground">Código: {docente.codigo}</p>
                   <div className="flex items-center gap-2">
                     <Shield className="h-4 w-4 text-green-500" />
@@ -554,6 +624,9 @@ ${entidad} • ${nivel} • ${grado} ${seccion} • ${anio} ${trimestre} • ${t
                       {curso}
                     </span>
                   ))}
+                  {docente.cursosAsignados.length === 0 && (
+                    <span className="text-sm text-muted-foreground">No hay materias asignadas para este nivel y año.</span>
+                  )}
                 </div>
               </div>
 

@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 // Dashboards
 import Index from "./pages/Index";
@@ -12,6 +13,7 @@ import ParentDashboard from "./pages/ParentDashboard";
 import StudentDashboard from "./pages/StudentDashboard";
 import TeacherDashboard from "./pages/TeacherDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import ChangePasswordPage from "./pages/ChangePasswordPage";
 
 // Subpáginas del dashboard de padres
 import InformacionEstudiante from "./pages/parent/InformacionEstudiante";
@@ -29,7 +31,8 @@ import Materias from "./pages/student/Materias";
 import TareasStudent from "./pages/student/Tareas";
 import NotasStudent from "./pages/student/Notas";
 import Asistencia from "./pages/student/Asistencia";
-import Horario from "./pages/student/Horario";
+import StudentHorario from "./pages/student/Horario";
+import TeacherHorario from "./pages/teacher/Horario";
 import ProgresoStudent from "./pages/student/Progreso";
 
 // Subpáginas del dashboard de docentes
@@ -65,6 +68,17 @@ import AdminActas from "./pages/admin/Actas";
 import AdminReportes from "./pages/admin/Reportes";
 import SeccionesAdmin from "./pages/admin/Secciones";
 import FinancialModule from "./pages/admin/FinancialModule";
+import ComunicadosAdmin from "./pages/admin/Comunicados";
+
+// ➕ NUEVOS módulos Admin (Cursos, Inscripciones, Padres, Asistencia, Conducta, Preinscripciones)
+import CursosAdmin from "./pages/admin/Cursos";
+import InscripcionesAdmin from "./pages/admin/Inscripciones";
+import PadresAdmin from "./pages/admin/Padres";
+import AsistenciaAdmin from "./pages/admin/Asistencia";
+import ConductaAdmin from "./pages/admin/Conducta";
+import PreinscripcionesAdmin from "./pages/admin/Preinscripciones";
+import TareasAdmin from "./pages/admin/Tareas";
+import JustificacionesAdmin from "./pages/admin/Justificaciones";
 
 // Módulo de Secretaría
 import SecretariaDashboard from "@/pages/admin/secretaria";
@@ -76,15 +90,19 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
+    <AuthProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Index />} />
+            
+            {/* Cambio de contraseña obligatorio */}
+            <Route path="/cambiar-password" element={<ChangePasswordPage />} />
 
-          {/* Selección de nivel (post-login estudiantes) */}
-          <Route path="/seleccionar-nivel" element={<SelectNivel />} />
+            {/* Selección de nivel (post-login estudiantes) */}
+            <Route path="/seleccionar-nivel" element={<SelectNivel />} />
           {/* Entradas por nivel: guardan el nivel y redirigen al dashboard del estudiante */}
           <Route path="/dashboard/inicial" element={<InicialEntry />} />
           <Route path="/dashboard/primaria" element={<PrimariaEntry />} />
@@ -108,7 +126,7 @@ const App = () => (
             <Route path="tareas" element={<TareasStudent />} />
             <Route path="notas" element={<NotasStudent />} />
             <Route path="asistencia" element={<Asistencia />} />
-            <Route path="horario" element={<Horario />} />
+            <Route path="horario" element={<StudentHorario />} />
             <Route path="progreso" element={<ProgresoStudent />} />
             <Route path="informacion" element={<Informacion />} />
           </Route>
@@ -121,7 +139,7 @@ const App = () => (
             <Route path="planificacion" element={<Planificacion />} />
             <Route path="reportes" element={<ReportesTeacher />} />
             <Route path="notas" element={<NotasTeacher />} />
-            <Route path="horario" element={<Horario />} />
+            <Route path="horario" element={<TeacherHorario />} />
             <Route path="informacion-docente" element={<InformacionDocente />} />
             <Route path="registro-valoracion" element={<RegistroValoracion />} />
   
@@ -135,6 +153,17 @@ const App = () => (
             <Route path="reportes" element={<AdminReportes />} />
             <Route path="secciones" element={<SeccionesAdmin />} />
             <Route path="financial" element={<FinancialModule />} />
+            <Route path="comunicados" element={<ComunicadosAdmin />} />
+
+            {/* NUEVOS módulos */}
+            <Route path="cursos" element={<CursosAdmin />} />
+            <Route path="inscripciones" element={<InscripcionesAdmin />} />
+            <Route path="padres" element={<PadresAdmin />} />
+            <Route path="asistencia" element={<AsistenciaAdmin />} />
+            <Route path="conducta" element={<ConductaAdmin />} />
+            <Route path="preinscripciones" element={<PreinscripcionesAdmin />} />
+            <Route path="tareas" element={<TareasAdmin />} />
+            <Route path="justificaciones" element={<JustificacionesAdmin />} />
 
             {/* Módulo de Secretaría */}
             <Route path="secretaria" element={<SecretariaDashboard />} />
@@ -161,6 +190,7 @@ const App = () => (
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
+  </AuthProvider>
   </QueryClientProvider>
 );
 

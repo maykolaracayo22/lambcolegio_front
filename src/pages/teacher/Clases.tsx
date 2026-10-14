@@ -1,5 +1,9 @@
 // src/pages/teacher/Clases.tsx
 import React, { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { getMyTeacherSections, getMyTeacherSectionStudents, type TeacherAssignedSection } from '@/services/teachersApi';
+import { getTeacherCreatedTasks, saveTeacherCreatedTask, type TeacherCreatedTask } from '@/services/teacherTasksStore';
+import { getClassAttendance, saveClassAttendance, type AttendanceStatus } from '@/services/teacherAttendanceApi';
 
 // Importaciones de Shadcn UI
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -47,6 +51,7 @@ interface Alumno {
 
 interface MateriaDocente {
   id: number;
+  sectionId: number;
   nombre: string;
   grado: string;
   grupo: string;
@@ -57,18 +62,7 @@ interface MateriaDocente {
   area: string;
 }
 
-interface TareaDetalle {
-  id: number;
-  materiaId: number;
-  titulo: string;
-  descripcion: string;
-  fechaAsignacion: string;
-  fechaEntrega: string;
-  ponderacion: number;
-  tipo: 'tarea' | 'examen' | 'proyecto' | 'investigación';
-  estado: 'abierta' | 'cerrada';
-  instrucciones?: string;
-}
+type TareaDetalle = TeacherCreatedTask;
 
 interface EntregaTarea {
   id: number;
@@ -82,6 +76,7 @@ interface EntregaTarea {
 }
 
 interface ClaseResumen extends MateriaDocente {
+  subjectId: number;
   numAlumnos: number;
   totalActividades: number;
   actividadesPendientes: number;
@@ -89,6 +84,7 @@ interface ClaseResumen extends MateriaDocente {
   promedioGeneral: number;
   promedioAsistencia: number;
   alumnosEnRiesgo: number;
+  datosAcademicosDisponibles: boolean;
 }
 
 // --- Componentes de Modales ---
@@ -135,9 +131,7 @@ const ModalCalificaciones = ({ clase, alumnos, entregas, onClose }: {
   };
 
   const guardarCalificaciones = () => {
-    console.log('Guardando calificaciones:', { calificaciones, comentarios });
-    alert('Calificaciones guardadas exitosamente');
-    onClose();
+    alert('Las calificaciones aún no se guardaron: este módulo todavía no está conectado al servicio de notas.');
   };
 
   const exportarCalificaciones = () => {
@@ -145,7 +139,7 @@ const ModalCalificaciones = ({ clase, alumnos, entregas, onClose }: {
       estudiante: `${alumno.nombre} ${alumno.apellido}`,
       calificacion: calificaciones[alumno.id] || 'Sin calificar',
       comentario: comentarios[alumno.id] || '',
-      asistencia: `${alumno.asistencia}%`
+      asistencia: 'Sin datos'
     }));
     
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -179,18 +173,18 @@ const ModalCalificaciones = ({ clase, alumnos, entregas, onClose }: {
           <div className="flex justify-between items-center">
             <div className="grid grid-cols-3 gap-4 text-sm">
               <div className="text-center p-2 bg-blue-50 rounded">
-                <div className="font-bold text-blue-600">{clase.promedioGeneral}</div>
+                <div className="font-bold text-blue-600">{clase.datosAcademicosDisponibles ? clase.promedioGeneral : 'Sin datos'}</div>
                 <div>Promedio General</div>
               </div>
               <div className="text-center p-2 bg-green-50 rounded">
                 <div className="font-bold text-green-600">
-                  {alumnos.filter(a => (calificaciones[a.id] || a.promedio) >= 70).length}
+                  {entregas.length ? alumnos.filter(a => (calificaciones[a.id] || a.promedio) >= 70).length : 'Sin datos'}
                 </div>
                 <div>Aprobados</div>
               </div>
               <div className="text-center p-2 bg-red-50 rounded">
                 <div className="font-bold text-red-600">
-                  {alumnos.filter(a => (calificaciones[a.id] || a.promedio) < 70).length}
+                  {entregas.length ? alumnos.filter(a => (calificaciones[a.id] || a.promedio) < 70).length : 'Sin datos'}
                 </div>
                 <div>En Riesgo</div>
               </div>
@@ -214,8 +208,8 @@ const ModalCalificaciones = ({ clase, alumnos, entregas, onClose }: {
                         <div>
                           <h4 className="font-semibold">{alumno.nombre} {alumno.apellido}</h4>
                           <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>Asistencia: {alumno.asistencia}%</span>
-                            <span>Promedio Actual: {alumno.promedio}</span>
+                            <span>Asistencia: Sin datos</span>
+                            <span>Promedio Actual: Sin datos</span>
                           </div>
                         </div>
                       </div>
@@ -244,12 +238,12 @@ const ModalCalificaciones = ({ clase, alumnos, entregas, onClose }: {
                           {calificaciones[alumno.id] ? `${calificaciones[alumno.id]}%` : 'Sin calificar'}
                         </div>
                       </div>
-                      <Badge className={
+                      <Badge className={!entregas.length ? 'bg-gray-100 text-gray-700' : (
                         (calificaciones[alumno.id] || alumno.promedio) >= 80 ? 'bg-green-100 text-green-700' :
                         (calificaciones[alumno.id] || alumno.promedio) >= 70 ? 'bg-yellow-100 text-yellow-700' : 
                         'bg-red-100 text-red-700'
-                      }>
-                        {(calificaciones[alumno.id] || alumno.promedio) >= 70 ? 'Aprobado' : 'En Riesgo'}
+                      )}>
+                        {!entregas.length ? 'Sin notas' : ((calificaciones[alumno.id] || alumno.promedio) >= 70 ? 'Aprobado' : 'En Riesgo')}
                       </Badge>
                     </div>
                   </div>
@@ -268,9 +262,12 @@ const ModalCalificaciones = ({ clase, alumnos, entregas, onClose }: {
   );
 };
 
-const ModalTareas = ({ clase, tareas, onClose }: {
+const ModalTareas = ({ clase, tareas, teacherId, teacherName, onCreate, onClose }: {
   clase: ClaseResumen;
   tareas: TareaDetalle[];
+  teacherId: string;
+  teacherName: string;
+  onCreate: (task: TeacherCreatedTask) => void;
   onClose: () => void;
 }) => {
   const [nuevaTarea, setNuevaTarea] = useState({
@@ -290,17 +287,25 @@ const ModalTareas = ({ clase, tareas, onClose }: {
       return;
     }
 
-    console.log('Creando nueva tarea:', { ...nuevaTarea, materiaId: clase.id });
-    alert('Tarea creada exitosamente');
-    
-    setNuevaTarea({
-      titulo: '',
-      descripcion: '',
-      fechaEntrega: '',
-      tipo: 'tarea',
-      ponderacion: 0,
-      instrucciones: ''
+    const today = new Date();
+    const fechaAsignacion = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    onCreate({
+      id: Date.now(),
+      materiaId: clase.id,
+      sectionId: clase.sectionId,
+      teacherId,
+      teacherName,
+      materiaNombre: clase.nombre,
+      grado: clase.grado,
+      grupo: clase.grupo,
+      nivel: localStorage.getItem('nivel') || '',
+      year: clase.cicloEscolar,
+      ...nuevaTarea,
+      fechaAsignacion,
+      estado: 'abierta',
     });
+    alert('Tarea creada correctamente. Ya aparece en Mis tareas.');
+    setNuevaTarea({ titulo: '', descripcion: '', fechaEntrega: '', tipo: 'tarea', ponderacion: 0, instrucciones: '' });
   };
 
   const getEstadoBadge = (estado: string) => {
@@ -426,6 +431,7 @@ const ModalTareas = ({ clase, tareas, onClose }: {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
+                {!tareasClase.length && <p className="text-sm text-muted-foreground">No hay actividades registradas para esta materia.</p>}
                 {tareasClase.map(tarea => (
                   <div key={tarea.id} className="flex items-start justify-between p-4 border rounded-lg">
                     <div className="flex items-start gap-3 flex-1">
@@ -469,24 +475,50 @@ const ModalTareas = ({ clase, tareas, onClose }: {
   );
 };
 
-const ModalAsistencia = ({ clase, alumnos, onClose }: {
+const ModalAsistencia = ({ clase, alumnos, teacherId, onClose }: {
   clase: ClaseResumen;
   alumnos: Alumno[];
+  teacherId: number;
   onClose: () => void;
 }) => {
-  const [asistencias, setAsistencias] = useState<Record<number, 'presente' | 'ausente' | 'tardanza'>>({});
+  const [asistencias, setAsistencias] = useState<Record<number, AttendanceStatus>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [fecha, setFecha] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  });
 
-  const marcarAsistencia = (alumnoId: number, estado: 'presente' | 'ausente' | 'tardanza') => {
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getClassAttendance(clase.sectionId, clase.subjectId, fecha)
+      .then((records) => { if (!cancelled) setAsistencias(Object.fromEntries(records.map((record) => [record.student_id, record.estado]))); })
+      .catch((error) => { console.error('No se pudo cargar la asistencia de esta clase:', error); if (!cancelled) setAsistencias({}); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [clase.sectionId, clase.subjectId, fecha]);
+
+  const marcarAsistencia = (alumnoId: number, estado: AttendanceStatus) => {
     setAsistencias(prev => ({
       ...prev,
       [alumnoId]: estado
     }));
   };
 
-  const guardarAsistencia = () => {
-    console.log('Asistencias guardadas:', asistencias);
-    alert('Asistencia registrada exitosamente');
-    onClose();
+  const guardarAsistencia = async () => {
+    const faltantes = alumnos.filter((alumno) => !asistencias[alumno.id]).length;
+    if (faltantes) { alert(`Marca la asistencia de todos los estudiantes. Faltan ${faltantes}.`); return; }
+    if (!teacherId) { alert('No se encontró el docente de esta sesión. Vuelve a iniciar sesión.'); return; }
+    setSaving(true);
+    try {
+      await saveClassAttendance({ section_id: clase.sectionId, subject_id: clase.subjectId, teacher_id: teacherId, fecha, attendances: alumnos.map((alumno) => ({ student_id: alumno.id, estado: asistencias[alumno.id] })) });
+      alert('La asistencia se guardó correctamente.');
+      onClose();
+    } catch (error: any) {
+      console.error('No se pudo guardar la asistencia:', error);
+      alert(error.response?.data?.message || 'No se pudo guardar la asistencia. Revisa tus permisos y vuelve a intentar.');
+    } finally { setSaving(false); }
   };
 
   const getEstadoColor = (estado: string) => {
@@ -516,9 +548,11 @@ const ModalAsistencia = ({ clase, alumnos, onClose }: {
             Registro de Asistencia - {clase.nombre}
           </DialogTitle>
           <DialogDescription>
-            {clase.grado}° {clase.grupo} - {new Date().toLocaleDateString('es-BO')}
+            {clase.grado}° {clase.grupo} · {clase.nombre}
           </DialogDescription>
         </DialogHeader>
+
+        <div className="flex items-center gap-3"><label htmlFor="attendance-date" className="text-sm font-medium">Fecha</label><Input id="attendance-date" type="date" value={fecha} onChange={(event) => setFecha(event.target.value)} max={new Date().toISOString().slice(0, 10)} className="w-auto" /></div>
 
         {/* Estadísticas Rápidas */}
         <div className="grid grid-cols-4 gap-4 mb-6">
@@ -541,7 +575,7 @@ const ModalAsistencia = ({ clase, alumnos, onClose }: {
         </div>
 
         <div className="space-y-3 max-h-96 overflow-y-auto">
-          {alumnos.map(alumno => (
+          {loading ? <p className="py-5 text-center text-sm text-muted-foreground">Cargando asistencias guardadas...</p> : alumnos.map(alumno => (
             <div key={alumno.id} className={`flex items-center justify-between p-3 border rounded-lg transition-colors ${
               getEstadoColor(asistencias[alumno.id] || '')
             }`}>
@@ -579,14 +613,15 @@ const ModalAsistencia = ({ clase, alumnos, onClose }: {
                   <XCircle className="h-4 w-4 mr-1" />
                   Ausente
                 </Button>
+                <Button size="sm" variant={asistencias[alumno.id] === 'justificado' ? 'default' : 'outline'} onClick={() => marcarAsistencia(alumno.id, 'justificado')}>Justificado</Button>
               </div>
             </div>
           ))}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={guardarAsistencia}>Guardar Asistencia</Button>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button onClick={guardarAsistencia} disabled={loading || saving || alumnos.length === 0}>{saving ? 'Guardando...' : 'Guardar Asistencia'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -652,19 +687,19 @@ const ModalEstadisticas = ({ clase, alumnos, tareas, entregas, onClose }: {
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
-                <div className="text-2xl font-bold text-green-600">{clase.promedioGeneral}</div>
+                <div className="text-2xl font-bold text-green-600">Sin datos</div>
                 <div className="text-sm text-muted-foreground">Promedio General</div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
-                <div className="text-2xl font-bold text-purple-600">{clase.promedioAsistencia}%</div>
+                <div className="text-2xl font-bold text-purple-600">Sin datos</div>
                 <div className="text-sm text-muted-foreground">Asistencia</div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
-                <div className="text-2xl font-bold text-orange-600">{clase.alumnosEnRiesgo}</div>
+                <div className="text-2xl font-bold text-orange-600">Sin datos</div>
                 <div className="text-sm text-muted-foreground">En Riesgo</div>
               </CardContent>
             </Card>
@@ -677,6 +712,7 @@ const ModalEstadisticas = ({ clase, alumnos, tareas, entregas, onClose }: {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
+                {!entregas.length && <p className="text-sm text-muted-foreground">No hay calificaciones registradas para mostrar.</p>}
                 {alumnos.map(alumno => {
                   const calificacionesAlumno = entregas
                     .filter(e => e.alumnoId === alumno.id && e.calificacion !== undefined)
@@ -694,12 +730,8 @@ const ModalEstadisticas = ({ clase, alumnos, tareas, entregas, onClose }: {
                           value={promedioAlumno} 
                           className="w-32" 
                         />
-                        <Badge className={
-                          promedioAlumno >= 80 ? 'bg-green-100 text-green-700' :
-                          promedioAlumno >= 70 ? 'bg-yellow-100 text-yellow-700' : 
-                          'bg-red-100 text-red-700'
-                        }>
-                          {promedioAlumno || 'N/A'}
+                        <Badge className="bg-gray-100 text-gray-700">
+                          {calificacionesAlumno.length ? promedioAlumno : 'Sin notas'}
                         </Badge>
                       </div>
                     </div>
@@ -751,113 +783,83 @@ const ModalEstadisticas = ({ clase, alumnos, tareas, entregas, onClose }: {
 
 // --- Componente Principal ---
 export default function TeacherClases() {
-  // --- Estados ---
+  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [clases, setClases] = useState<ClaseResumen[]>([]);
+  const [alumnosPorSeccion, setAlumnosPorSeccion] = useState<Record<number, Alumno[]>>({});
   const [modalAbierto, setModalAbierto] = useState<'calificaciones' | 'tareas' | 'asistencia' | 'estadisticas' | null>(null);
   const [claseSeleccionada, setClaseSeleccionada] = useState<ClaseResumen | null>(null);
   const [filtroGrado, setFiltroGrado] = useState('todos');
   const [busqueda, setBusqueda] = useState('');
+  const nivel = String(localStorage.getItem('nivel') || '').toLowerCase();
+  const year = String(new Date().getFullYear());
+  const teacherName = [user?.teacher?.nombre, user?.teacher?.apellido].filter(Boolean).join(' ') || user?.name || 'Docente';
 
-  // --- Mocks de Datos Mejorados ---
-  const MOCK_ALUMNOS_DATA: Alumno[] = [
-    { id: 101, nombre: 'Ana', apellido: 'Gómez', grado: '1', grupo: 'A', asistencia: 95, promedio: 85 },
-    { id: 102, nombre: 'Carlos', apellido: 'Ruiz', grado: '1', grupo: 'A', asistencia: 88, promedio: 78 },
-    { id: 103, nombre: 'Sofía', apellido: 'Martínez', grado: '1', grupo: 'A', asistencia: 92, promedio: 91 },
-    { id: 104, nombre: 'Juan', apellido: 'Pérez', grado: '1', grupo: 'A', asistencia: 85, promedio: 82 },
-    { id: 105, nombre: 'María', apellido: 'López', grado: '1', grupo: 'B', asistencia: 96, promedio: 88 },
-    { id: 106, nombre: 'Pedro', apellido: 'Sánchez', grado: '1', grupo: 'B', asistencia: 90, promedio: 79 },
-  ];
-
-  const MOCK_MATERIAS_DOCENTE_DATA: MateriaDocente[] = [
-    { 
-      id: 1, 
-      nombre: 'Matemáticas', 
-      grado: '1', 
-      grupo: 'A', 
-      docenteId: 1,
-      horario: 'Lunes y Miércoles 8:00-9:30',
-      aula: 'A-201',
-      cicloEscolar: '2024',
-      area: 'Ciencias Exactas'
-    },
-    { 
-      id: 2, 
-      nombre: 'Física', 
-      grado: '1', 
-      grupo: 'A', 
-      docenteId: 1,
-      horario: 'Martes y Jueves 10:00-11:30',
-      aula: 'Laboratorio F-101',
-      cicloEscolar: '2024',
-      area: 'Ciencias Exactas'
-    },
-    { 
-      id: 3, 
-      nombre: 'Matemáticas', 
-      grado: '1', 
-      grupo: 'B', 
-      docenteId: 1,
-      horario: 'Lunes y Miércoles 14:00-15:30',
-      aula: 'A-202',
-      cicloEscolar: '2024',
-      area: 'Ciencias Exactas'
-    },
-  ];
-
-  const MOCK_TAREAS_DATA: TareaDetalle[] = [
-    {
-      id: 1, materiaId: 1, titulo: 'Guía de Álgebra', 
-      descripcion: 'Resolver ejercicios de álgebra lineal del capítulo 3.',
-      fechaAsignacion: '2024-01-10', fechaEntrega: '2024-01-20', 
-      ponderacion: 20, tipo: 'tarea', estado: 'cerrada',
-      instrucciones: 'Mostrar procedimiento completo'
-    },
-    {
-      id: 2, materiaId: 1, titulo: 'Examen Unidad 1', 
-      descripcion: 'Evaluación de los temas de la primera unidad.',
-      fechaAsignacion: '2024-01-15', fechaEntrega: '2024-01-25', 
-      ponderacion: 40, tipo: 'examen', estado: 'cerrada'
-    },
-    {
-      id: 3, materiaId: 1, titulo: 'Proyecto Final', 
-      descripcion: 'Desarrollar un proyecto aplicando los conceptos de todo el curso.',
-      fechaAsignacion: '2024-02-01', fechaEntrega: '2024-02-15', 
-      ponderacion: 40, tipo: 'proyecto', estado: 'abierta',
-      instrucciones: 'Incluir documentación y código fuente'
-    },
-  ];
-
-  const MOCK_ENTREGAS_DATA: EntregaTarea[] = [
-    { id: 1, tareaId: 1, alumnoId: 101, fechaEntregaReal: '2024-01-19', calificacion: 85, estado: 'entregado' },
-    { id: 2, tareaId: 1, alumnoId: 102, fechaEntregaReal: '2024-01-20', calificacion: 70, estado: 'entregado' },
-    { id: 3, tareaId: 1, alumnoId: 103, estado: 'pendiente' },
-    { id: 4, tareaId: 1, alumnoId: 104, fechaEntregaReal: '2024-01-18', calificacion: 92, estado: 'entregado' },
-  ];
-
-  // --- Simulación de carga ---
   useEffect(() => {
+    let cancelled = false;
     const fetchData = async () => {
       setIsLoading(true);
+      setError(null);
       try {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        if (Math.random() < 0.02) {
-          throw new Error('Error de conexión al servidor');
-        }
+        if (!nivel) throw new Error('Selecciona un nivel desde el panel docente para ver tus clases.');
+        const response = await getMyTeacherSections(year, nivel);
+        const sections = response.data || [];
+        const studentResults = await Promise.all(sections.map(async (section) => {
+          const students = await getMyTeacherSectionStudents(section.id);
+          return [section.id, students.map((student) => ({
+            id: student.id,
+            nombre: student.nombres || '',
+            apellido: student.apellidos || '',
+            grado: String(section.curso),
+            grupo: section.paralelo,
+            asistencia: 0,
+            promedio: 0,
+          }))] as const;
+        }));
+        if (cancelled) return;
+        const studentsBySection: Record<number, Alumno[]> = {};
+        studentResults.forEach(([sectionId, students]) => { studentsBySection[sectionId] = students; });
+        setAlumnosPorSeccion(studentsBySection);
+        const actualClasses = sections.flatMap((section: TeacherAssignedSection) =>
+          section.assignments.map((assignment) => ({
+            id: assignment.id,
+            subjectId: assignment.subject_id,
+            sectionId: section.id,
+            nombre: assignment.subject?.nombre || 'Materia',
+            grado: String(section.curso),
+            grupo: section.paralelo,
+            docenteId: Number(user?.teacherId ?? user?.id ?? 0),
+            horario: 'Horario no registrado',
+            aula: section.aula || 'Sin aula asignada',
+            cicloEscolar: String(section.year),
+            area: assignment.subject?.area || 'Área no registrada',
+            numAlumnos: (studentResults.find(([sectionId]) => sectionId === section.id)?.[1] || []).length,
+            totalActividades: 0,
+            actividadesPendientes: 0,
+            actividadesAtrasadas: 0,
+            promedioGeneral: 0,
+            promedioAsistencia: 0,
+            alumnosEnRiesgo: 0,
+            datosAcademicosDisponibles: false,
+          } as ClaseResumen))
+        );
+        setClases(actualClasses);
       } catch (err: any) {
-        setError(err.message);
+        if (!cancelled) setError(err.response?.data?.message || err.message || 'No se pudieron cargar tus clases.');
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
     fetchData();
-  }, []);
+    return () => { cancelled = true; };
+  }, [nivel, year, user?.id, user?.teacherId]);
 
   // --- Lógica para resumen de clases ---
   const resumenClases = useMemo(() => {
     if (isLoading || error) return [];
 
-    let clasesFiltradas = MOCK_MATERIAS_DOCENTE_DATA;
+    let clasesFiltradas = clases;
 
     // Aplicar filtros
     if (filtroGrado !== 'todos') {
@@ -872,73 +874,26 @@ export default function TeacherClases() {
       );
     }
 
-    return clasesFiltradas.map(materia => {
-      const alumnosEnGrupo = MOCK_ALUMNOS_DATA.filter(a => a.grado === materia.grado && a.grupo === materia.grupo);
-      const tareasDeMateria = MOCK_TAREAS_DATA.filter(t => t.materiaId === materia.id);
+    return clasesFiltradas;
+  }, [clases, isLoading, error, filtroGrado, busqueda]);
 
-      let actividadesPendientes = 0;
-      let actividadesAtrasadas = 0;
-      let sumatoriaCalificaciones = 0;
-      let conteoCalificaciones = 0;
-      let sumatoriaAsistencia = 0;
-
-      tareasDeMateria.forEach(tarea => {
-        const fechaEntregaTarea = new Date(tarea.fechaEntrega);
-        const today = new Date();
-        fechaEntregaTarea.setHours(23, 59, 59, 999);
-
-        const entregasParaTarea = MOCK_ENTREGAS_DATA.filter(
-          e => e.tareaId === tarea.id && alumnosEnGrupo.some(a => a.id === e.alumnoId)
-        );
-
-        const alumnosQueEntregaron = new Set(
-          entregasParaTarea.filter(e => e.estado === 'entregado' || e.estado === 'atrasado')
-            .map(e => e.alumnoId)
-        ).size;
-        
-        const alumnosSinEntrega = alumnosEnGrupo.length - alumnosQueEntregaron;
-
-        if (alumnosSinEntrega > 0) {
-          if (fechaEntregaTarea < today) {
-            actividadesAtrasadas++;
-          } else if (tarea.estado === 'abierta') {
-            actividadesPendientes++;
-          }
-        }
-
-        entregasParaTarea.forEach(e => {
-          if (e.calificacion !== undefined) {
-            sumatoriaCalificaciones += e.calificacion;
-            conteoCalificaciones++;
-          }
-        });
-      });
-
-      // Calcular promedios
-      alumnosEnGrupo.forEach(alumno => {
-        sumatoriaAsistencia += alumno.asistencia;
-      });
-
-      const promedioGeneral = conteoCalificaciones > 0 ? 
-        Math.round(sumatoriaCalificaciones / conteoCalificaciones) : 0;
-      
-      const promedioAsistencia = alumnosEnGrupo.length > 0 ?
-        Math.round(sumatoriaAsistencia / alumnosEnGrupo.length) : 0;
-
-      const alumnosEnRiesgo = alumnosEnGrupo.filter(a => a.promedio < 70 || a.asistencia < 80).length;
-
-      return {
-        ...materia,
-        numAlumnos: alumnosEnGrupo.length,
-        totalActividades: tareasDeMateria.length,
-        actividadesPendientes,
-        actividadesAtrasadas,
-        promedioGeneral,
-        promedioAsistencia,
-        alumnosEnRiesgo
-      } as ClaseResumen;
-    });
-  }, [isLoading, error, filtroGrado, busqueda]);
+  const teacherId = String(user?.teacherId ?? user?.id ?? 'teacher');
+  const [tareas, setTareas] = useState<TareaDetalle[]>(() => getTeacherCreatedTasks(teacherId));
+  useEffect(() => {
+    const refresh = () => setTareas(getTeacherCreatedTasks(teacherId));
+    window.addEventListener('teacher-tasks-updated', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('teacher-tasks-updated', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, [teacherId]);
+  const crearTarea = (task: TeacherCreatedTask) => {
+    saveTeacherCreatedTask(task);
+    setTareas(getTeacherCreatedTasks(teacherId));
+  };
+  const entregas: EntregaTarea[] = [];
+  const alumnosDeClase = (clase: ClaseResumen | null) => clase ? (alumnosPorSeccion[clase.sectionId] || []) : [];
 
   // --- Handlers para modales ---
   const abrirModal = (tipo: 'calificaciones' | 'tareas' | 'asistencia' | 'estadisticas', clase: ClaseResumen) => {
@@ -977,7 +932,8 @@ export default function TeacherClases() {
 
           </h1>
           <p className="text-muted-foreground">
-            Gestión académica para el ciclo escolar 2025 - Bolivia
+            Gestión académica para el ciclo escolar {year} · {nivel.charAt(0).toUpperCase() + nivel.slice(1)}
+            <span className="block text-sm mt-1">Docente: {teacherName}</span>
           </p>
         </div>
       </div>
@@ -1003,7 +959,7 @@ export default function TeacherClases() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos los grados</SelectItem>
-                  {Array.from(new Set(MOCK_MATERIAS_DOCENTE_DATA.map(m => m.grado))).sort().map(grado => (
+                  {Array.from(new Set(clases.map(m => m.grado))).sort().map(grado => (
                     <SelectItem key={grado} value={grado}>{grado}°</SelectItem>
                   ))}
                 </SelectContent>
@@ -1036,8 +992,8 @@ export default function TeacherClases() {
       ) : resumenClases.length === 0 ? (
         <Card className="text-center py-12 text-muted-foreground">
           <Info className="h-16 w-16 mx-auto mb-4 text-gray-400" />
-          <p className="text-lg font-medium">No se encontraron clases con los filtros aplicados.</p>
-          <p className="mt-2 text-sm">Intenta ajustar los criterios de búsqueda.</p>
+          <p className="text-lg font-medium">{clases.length === 0 ? `No tienes cursos asignados para ${nivel || 'este nivel'} en ${year}.` : 'No se encontraron clases con los filtros aplicados.'}</p>
+          <p className="mt-2 text-sm">{clases.length === 0 ? 'Solicita a administración que revise tus asignaciones.' : 'Intenta ajustar los criterios de búsqueda.'}</p>
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1078,42 +1034,28 @@ export default function TeacherClases() {
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Promedio</span>
                       <span className={`font-bold ${
+                        !clase.datosAcademicosDisponibles ? 'text-muted-foreground' :
                         clase.promedioGeneral >= 80 ? 'text-green-600' : 
                         clase.promedioGeneral >= 70 ? 'text-yellow-600' : 'text-red-600'
                       }`}>
-                        {clase.promedioGeneral}
+                        {clase.datosAcademicosDisponibles ? clase.promedioGeneral : 'Sin datos'}
                       </span>
                     </div>
-                    <Progress value={clase.promedioGeneral} className="h-1" />
+                    <Progress value={clase.datosAcademicosDisponibles ? clase.promedioGeneral : 0} className="h-1" />
                   </div>
 
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Asistencia</span>
-                      <span className="font-bold text-blue-600">{clase.promedioAsistencia}%</span>
+                      <span className="font-bold text-blue-600">Sin datos</span>
                     </div>
-                    <Progress value={clase.promedioAsistencia} className="h-1" />
+                    <Progress value={0} className="h-1" />
                   </div>
                 </div>
 
                 {/* Indicadores de Tareas */}
                 <div className="flex justify-between items-center text-xs text-muted-foreground mb-4">
-                  <div className="flex items-center gap-1">
-                    <CheckCircle className="h-3 w-3 text-green-500" />
-                    <span>{clase.totalActividades - clase.actividadesPendientes - clase.actividadesAtrasadas}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Clock className="h-3 w-3 text-yellow-500" />
-                    <span>{clase.actividadesPendientes}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3 text-red-500" />
-                    <span>{clase.actividadesAtrasadas}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3 text-orange-500" />
-                    <span>{clase.alumnosEnRiesgo} en riesgo</span>
-                  </div>
+                  <span>Actividades y resultados: sin datos registrados</span>
                 </div>
 
                 {/* Menú de Acciones Mejorado */}
@@ -1161,8 +1103,8 @@ export default function TeacherClases() {
       {modalAbierto === 'calificaciones' && claseSeleccionada && (
         <ModalCalificaciones
           clase={claseSeleccionada}
-          alumnos={MOCK_ALUMNOS_DATA.filter(a => a.grado === claseSeleccionada.grado && a.grupo === claseSeleccionada.grupo)}
-          entregas={MOCK_ENTREGAS_DATA}
+          alumnos={alumnosDeClase(claseSeleccionada)}
+          entregas={entregas}
           onClose={cerrarModal}
         />
       )}
@@ -1170,7 +1112,10 @@ export default function TeacherClases() {
       {modalAbierto === 'tareas' && claseSeleccionada && (
         <ModalTareas
           clase={claseSeleccionada}
-          tareas={MOCK_TAREAS_DATA}
+          tareas={tareas}
+          teacherId={teacherId}
+          teacherName={user?.name || 'Docente'}
+          onCreate={crearTarea}
           onClose={cerrarModal}
         />
       )}
@@ -1178,7 +1123,8 @@ export default function TeacherClases() {
       {modalAbierto === 'asistencia' && claseSeleccionada && (
         <ModalAsistencia
           clase={claseSeleccionada}
-          alumnos={MOCK_ALUMNOS_DATA.filter(a => a.grado === claseSeleccionada.grado && a.grupo === claseSeleccionada.grupo)}
+          alumnos={alumnosDeClase(claseSeleccionada)}
+          teacherId={Number(user?.teacherId ?? user?.teacher?.id ?? 0)}
           onClose={cerrarModal}
         />
       )}
@@ -1186,9 +1132,9 @@ export default function TeacherClases() {
       {modalAbierto === 'estadisticas' && claseSeleccionada && (
         <ModalEstadisticas
           clase={claseSeleccionada}
-          alumnos={MOCK_ALUMNOS_DATA.filter(a => a.grado === claseSeleccionada.grado && a.grupo === claseSeleccionada.grupo)}
-          tareas={MOCK_TAREAS_DATA}
-          entregas={MOCK_ENTREGAS_DATA}
+          alumnos={alumnosDeClase(claseSeleccionada)}
+          tareas={tareas}
+          entregas={entregas}
           onClose={cerrarModal}
         />
       )}

@@ -1,7 +1,9 @@
+//crs/pages/StudentDashboard.tsx
 /**
  * @file StudentDashboard.tsx
  * @description Panel principal para estudiantes que proporciona acceso a todas las
  * funcionalidades académicas incluyendo materias, tareas, notas y progreso.
+ * CONECTADO AL BACKEND - Consume API real
  */
 
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
@@ -11,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 import {
   BookOpen,
   ClipboardList,
@@ -25,8 +29,10 @@ import {
   Target,
   GraduationCap,
   UserCircle,
-  History
+  History,
+  RefreshCw
 } from "lucide-react";
+import { getMyDashboardStats, getMyProfile, StudentDashboardStats, StudentProfile } from "@/services/studentPortalApi";
 
 // Tipos e interfaces
 interface StudentStats {
@@ -68,32 +74,136 @@ interface MenuItem {
 const StudentDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { toast } = useToast();
 
-  // Estado para estadísticas del estudiante
+  // Estados
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [stats, setStats] = useState<StudentStats>({
-    promedio: 85,
-    tareasPendientes: 3,
-    proximasEvaluaciones: 2,
-    asistencia: 95,
-    logros: 8,
+    promedio: 0,
+    tareasPendientes: 0,
+    proximasEvaluaciones: 0,
+    asistencia: 0,
+    logros: 0,
     promediosBimestrales: [
-      { bimestre: 1, promedio: 87, estado: 'aprobado' },
-      { bimestre: 2, promedio: 85, estado: 'aprobado' },
+      { bimestre: 1, promedio: 0, estado: 'pendiente' },
+      { bimestre: 2, promedio: 0, estado: 'pendiente' },
       { bimestre: 3, promedio: 0, estado: 'pendiente' },
       { bimestre: 4, promedio: 0, estado: 'pendiente' }
     ],
     areasDesempenio: {
-      cosmos: 88,
-      vida: 85,
-      ciencia: 83,
-      comunidad: 89
+      cosmos: 0,
+      vida: 0,
+      ciencia: 0,
+      comunidad: 0
     },
-    actividadesComplementarias: [
-      { nombre: 'Feria Científica', fecha: '2025-11-15', tipo: 'feria' },
-      { nombre: 'Olimpiada de Matemáticas', fecha: '2025-11-20', tipo: 'olimpiada' },
-      { nombre: 'Festival Cultural', fecha: '2025-12-05', tipo: 'evento' }
-    ]
+    actividadesComplementarias: []
   });
+
+  // Cargar datos del estudiante desde el backend
+  const fetchStudentData = async (showRefreshToast = false) => {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      if (showRefreshToast) setRefreshing(true);
+
+      // Cargar perfil y estadísticas en paralelo
+      const [profileData, dashboardStats] = await Promise.all([
+        getMyProfile().catch(() => null),
+        getMyDashboardStats().catch(() => null)
+      ]);
+
+      if (profileData) {
+        setProfile(profileData);
+      }
+
+      if (dashboardStats) {
+        setStats({
+          promedio: dashboardStats.promedio_general,
+          tareasPendientes: dashboardStats.tareas_pendientes,
+          proximasEvaluaciones: dashboardStats.proximas_evaluaciones,
+          asistencia: dashboardStats.asistencia_porcentaje,
+          logros: 0, // TODO: Implementar logros
+          promediosBimestrales: dashboardStats.promedios_bimestrales.map(b => ({
+            bimestre: b.bimestre,
+            promedio: b.promedio,
+            estado: b.estado
+          })),
+          areasDesempenio: dashboardStats.areas_desempeno,
+          actividadesComplementarias: []
+        });
+      }
+
+      if (showRefreshToast) {
+        toast({
+          title: "Datos actualizados",
+          description: "Se han cargado los datos más recientes",
+        });
+      }
+    } catch (error) {
+      console.error('Error cargando datos del estudiante:', error);
+      if (showRefreshToast) {
+        toast({
+          title: "Error",
+          description: "No se pudieron actualizar los datos",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    // Esperar a que el token esté disponible
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      fetchStudentData();
+    } else {
+      // Esperar un momento por si el login está en proceso
+      const timer = setTimeout(() => {
+        fetchStudentData();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  // Obtener nombre del usuario desde localStorage
+  const getUserName = () => {
+    if (profile) {
+      return `${profile.nombres} ${profile.apellidos}`;
+    }
+    try {
+      const userStr = localStorage.getItem('authUser') || localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        return user.name || user.student?.nombre || 'Estudiante';
+      }
+    } catch {
+      return 'Estudiante';
+    }
+    return 'Estudiante';
+  };
+
+  const getStudentInfo = () => {
+    if (profile) {
+      return `${profile.curso} ${profile.paralelo} · ${profile.nivel}`;
+    }
+    return 'Estudiante';
+  };
+
+  const latestBimestre = stats.promediosBimestrales
+    .filter((bimestre) => bimestre.promedio > 0)
+    .reduce((latest, bimestre) => Math.max(latest, bimestre.bimestre), 0);
+  const studentCourse = profile
+    ? `${profile.nivel[0].toUpperCase()}${profile.nivel.slice(1)} · ${profile.curso} ${profile.paralelo}`
+    : loading ? 'Cargando datos del estudiante…' : 'Curso no disponible';
 
   // Menú items con badges y descripciones
   const menuItems: MenuItem[] = [
@@ -174,12 +284,20 @@ const StudentDashboard = () => {
               <GraduationCap className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="font-medium">5to Secundaria</h3>
-              <p className="text-xs text-muted-foreground">2do Bimestre 2025</p>
+              <h3 className="font-medium">{studentCourse}</h3>
+              <p className="text-xs text-muted-foreground">
+                Gestión {new Date().getFullYear()}{latestBimestre ? ` · Bimestre ${latestBimestre}` : ''}
+              </p>
             </div>
           </div>
-          <Progress value={75} className="h-2" />
-          <p className="text-xs text-muted-foreground mt-2">75% del bimestre completado</p>
+          {stats.promedio > 0 ? (
+            <>
+              <Progress value={Math.min(100, stats.promedio)} className="h-2" />
+              <p className="text-xs text-muted-foreground mt-2">Promedio general: {stats.promedio}</p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">Aún no hay calificaciones registradas</p>
+          )}
         </CardContent>
       </Card>
 
@@ -226,8 +344,8 @@ const StudentDashboard = () => {
   return (
     <DashboardLayout
       userType="student"
-      userName="Carlos Ramírez"
-      userInfo="Estudiante de 5to Secundaria"
+      userName={getUserName()}
+      userInfo={getStudentInfo()}
       sidebarContent={sidebarContent}
     >
       <div className="space-y-6">
@@ -242,10 +360,20 @@ const StudentDashboard = () => {
               progreso.
             </p>
           </div>
-          <Button variant="academicYellow">
-            <Download className="h-4 w-4 mr-2" />
-            Descargar Reporte
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => fetchStudentData(true)}
+              disabled={refreshing}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Actualizar
+            </Button>
+            <Button variant="academicYellow">
+              <Download className="h-4 w-4 mr-2" />
+              Descargar Reporte
+            </Button>
+          </div>
         </div>
 
         {/* Outlet para subpáginas */}
@@ -255,7 +383,20 @@ const StudentDashboard = () => {
         {location.pathname === "/dashboard/student" && (
           <div className="grid gap-6">
             {/* Cards de resumen */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {loading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {[1, 2, 3, 4].map(i => (
+                  <Card key={i}>
+                    <CardContent className="pt-6">
+                      <Skeleton className="h-8 w-24 mb-2" />
+                      <Skeleton className="h-10 w-16" />
+                      <Skeleton className="h-2 w-full mt-4" />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card className="bg-gradient-to-br from-blue-50 to-blue-100">
                 <CardContent className="pt-6">
                   <div className="flex justify-between items-start">
@@ -307,19 +448,20 @@ const StudentDashboard = () => {
                 <CardContent className="pt-6">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-sm text-muted-foreground mb-1">Logros</p>
-                      <p className="text-3xl font-bold text-purple-600">{stats.logros}</p>
+                      <p className="text-sm text-muted-foreground mb-1">Materias</p>
+                      <p className="text-3xl font-bold text-purple-600">{stats.logros || '-'}</p>
                     </div>
                     <div className="p-2 bg-purple-200 rounded-full">
                       <Award className="h-5 w-5 text-purple-600" />
                     </div>
                   </div>
                   <div className="text-sm text-muted-foreground mt-4">
-                    ¡2 nuevos esta semana!
+                    Materias inscritas
                   </div>
                 </CardContent>
               </Card>
             </div>
+            )}
 
             {/* Rendimiento por Áreas */}
             <Card>

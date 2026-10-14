@@ -5,12 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Edit, Trash2, Search, School } from "lucide-react";
-import CrudFormDialog, { Field } from "@/pages/admin/CrudFormDialog";
+import { Plus, Edit, Trash2, Search, School, Users, Copy } from "lucide-react";
+import SectionFormDialog from "@/pages/admin/SectionFormDialog";
+import StudentsModal from "@/pages/admin/StudentsModal";
 import { pushAudit } from "@/lib/audit";
 
-// Catálogos locales (solo para selects y fallback)
-import { niveles, turnos, cursosPorNivel, paralelosSugeridos } from "@/lib/sections";
+// Catalogos locales (solo para selects y fallback)
+import { niveles } from "@/lib/sections";
 import type { NivelKey } from "@/lib/sections";
 
 // API de secciones (Laravel)
@@ -19,6 +20,7 @@ import {
   createSection,
   updateSection,
   deleteSection,
+  duplicateSectionsYear,
   type Section,
 } from "@/services/sectionsApi";
 
@@ -43,9 +45,9 @@ export default function SeccionesAdmin() {
       setTotal(res.total);
       setLastPage(res.last_page);
       setPage(res.current_page);
-      console.log("✔ loaded", { count: res.data.length, total: res.total });
+      console.log("OK loaded", { count: res.data.length, total: res.total });
     } catch (e: unknown) {
-      console.error("✖ error refresh", e);
+      console.error("Error refresh", e);
       alert((e as Error)?.message || "Error cargando secciones");
     } finally {
       setLoading(false);
@@ -55,12 +57,11 @@ export default function SeccionesAdmin() {
 
   useEffect(() => {
     refresh(1);
-    // persist selected year to localStorage so other admin pages reuse it
     try { localStorage.setItem("adm:year", year); } catch (err: unknown) { console.warn("Could not persist adm:year", err); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, nivel]);
 
-  // Filtrado por búsqueda simple en front
+  // Filtrado por busqueda simple en front
   const filtered = useMemo(() => {
     return rows
       .filter(s =>
@@ -73,23 +74,41 @@ export default function SeccionesAdmin() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Section | null>(null);
 
-  const cursoOptions = useMemo(() => cursosPorNivel[nivel], [nivel]);
+  // ---- Modal de estudiantes
+  const [studentsModalOpen, setStudentsModalOpen] = useState(false);
+  const [selectedSectionForStudents, setSelectedSectionForStudents] = useState<Section | null>(null);
 
-  const fields: Field[] = [
-    { type: "text", name: "year", label: "Año de gestión", required: true, disabled: true },
-    { type: "select", name: "nivel", label: "Nivel", options: niveles.map(n => ({ value: n, label: n[0].toUpperCase()+n.slice(1) })), required: true },
-    { type: "select", name: "curso", label: "Curso (año de escolaridad)", options: cursoOptions.map(c => ({ value: c, label: c })), required: true },
-    { type: "select", name: "paralelo", label: "Paralelo", options: paralelosSugeridos.map(p => ({ value: p, label: p })), required: true },
-    { type: "select", name: "turno", label: "Turno", options: turnos.map(t => ({ value: t, label: t })), required: true },
-    { type: "text", name: "aula", label: "Aula (opcional)" },
-    { type: "number", name: "capacidad", label: "Capacidad (opcional)" },
-    { type: "select", name: "estado", label: "Estado", options: [{ value: "ACTIVA", label: "ACTIVA" }, { value: "CERRADA", label: "CERRADA" }], required: true },
-  ];
+  const openStudentsModal = (s: Section) => {
+    setSelectedSectionForStudents(s);
+    setStudentsModalOpen(true);
+  };
+
+  // ---- Duplicar secciones
+  const [duplicating, setDuplicating] = useState(false);
+
+  const handleDuplicateFromLastYear = async () => {
+    const sourceYear = String(Number(year) - 1);
+    const confirmMsg = `Duplicar secciones de ${sourceYear} a ${year}?\n\nSe copiaran todas las secciones del nivel "${nivel}" (sin estudiantes ni tutor).`;
+    if (!confirm(confirmMsg)) return;
+
+    setDuplicating(true);
+    try {
+      const result = await duplicateSectionsYear(sourceYear, year, nivel);
+      alert(result.message);
+      pushAudit("section:duplicate", { sourceYear, targetYear: year, nivel, ...result });
+      await refresh(1);
+    } catch (e: unknown) {
+      console.error("Error duplicando:", e);
+      alert((e as Error)?.message || "Error al duplicar secciones");
+    } finally {
+      setDuplicating(false);
+    }
+  };
 
   const openCreate = () => { setEditing(null); setOpen(true); };
   const openEdit = (s: Section) => { setEditing(s); setOpen(true); };
 
-  const onSubmit = async (vals: Record<string, unknown>) => {
+  const onSubmit = async (vals: Partial<Section>) => {
     const payload = {
       year: String(vals.year),
       nivel: vals.nivel as NivelKey,
@@ -98,7 +117,7 @@ export default function SeccionesAdmin() {
       turno: vals.turno as Section["turno"],
       aula: vals.aula ? String(vals.aula) : null,
       capacidad: vals.capacidad ? Number(vals.capacidad) : null,
-      tutor_id: vals.tutor_id ? Number(vals.tutor_id) : null,
+      tutor_id: vals.tutor_id ?? null,
       estado: vals.estado as "ACTIVA" | "CERRADA",
     };
 
@@ -113,25 +132,23 @@ export default function SeccionesAdmin() {
       }
       await refresh(page);
       setOpen(false);
-      console.log("✔ guardado");
+      console.log("OK guardado");
     } catch (e: unknown) {
-      console.error("✖ error submit", e);
-      alert((e as Error)?.message || "Error guardando la sección");
-    } finally {
-      console.groupEnd();
+      console.error("Error submit", e);
+      alert((e as Error)?.message || "Error guardando la seccion");
     }
   };
 
   const remove = async (id: number | string) => {
-    if (!confirm("¿Eliminar sección (paralelo)?")) return;
+    if (!confirm("Eliminar seccion (paralelo)?")) return;
     console.groupCollapsed("[Secciones] delete", { id });
     try {
       await deleteSection(id);
       pushAudit("section:delete", { id });
       await refresh(page);
-      console.log("✔ eliminado");
+      console.log("OK eliminado");
     } catch (e: unknown) {
-      console.error("✖ error delete", e);
+      console.error("Error delete", e);
       alert((e as Error)?.message || "Error eliminando");
     } finally {
       console.groupEnd();
@@ -142,7 +159,7 @@ export default function SeccionesAdmin() {
     <div className="space-y-6 p-4">
       <div className="flex items-center gap-2">
         <School className="h-6 w-6 text-blue-600" />
-        <h1 className="text-2xl font-bold">Secciones / Paralelos — {year}</h1>
+        <h1 className="text-2xl font-bold">Secciones / Paralelos - {year}</h1>
       </div>
 
       <Card>
@@ -162,23 +179,28 @@ export default function SeccionesAdmin() {
           </div>
 
           <Button onClick={openCreate} disabled={loading}>
-            <Plus className="h-4 w-4 mr-2" /> Nueva Sección
+            <Plus className="h-4 w-4 mr-2" /> Nueva Seccion
+          </Button>
+
+          <Button variant="outline" onClick={handleDuplicateFromLastYear} disabled={loading || duplicating}>
+            <Copy className="h-4 w-4 mr-2" /> Copiar de {Number(year) - 1}
           </Button>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Listado {loading ? "(cargando…)" : ""}</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Listado {loading ? "(cargando...)" : ""}</CardTitle></CardHeader>
         <CardContent className="rounded-md border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Nivel</TableHead>
-                <TableHead>Curso (año)</TableHead>
+                <TableHead>Curso (anio)</TableHead>
                 <TableHead>Paralelo</TableHead>
                 <TableHead>Turno</TableHead>
                 <TableHead>Aula</TableHead>
-                <TableHead>Cap.</TableHead>
+                <TableHead>Estudiantes</TableHead>
+                <TableHead>Tutor</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
@@ -190,8 +212,25 @@ export default function SeccionesAdmin() {
                   <TableCell>{s.curso}</TableCell>
                   <TableCell>{s.paralelo}</TableCell>
                   <TableCell>{s.turno}</TableCell>
-                  <TableCell>{s.aula || "—"}</TableCell>
-                  <TableCell>{s.capacidad ?? "—"}</TableCell>
+                  <TableCell>{s.aula || "-"}</TableCell>
+                  <TableCell>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-auto p-1 font-normal"
+                      onClick={() => openStudentsModal(s)}
+                    >
+                      <Users className="h-3 w-3 mr-1" />
+                      <span className={
+                        s.capacidad && (s.estudiantes_count ?? 0) >= s.capacidad 
+                          ? "text-red-600 font-semibold" 
+                          : ""
+                      }>
+                        {s.estudiantes_count ?? 0}/{s.capacidad ?? "-"}
+                      </span>
+                    </Button>
+                  </TableCell>
+                  <TableCell>{s.tutor ? `${s.tutor.nombres} ${s.tutor.apellidos}` : "-"}</TableCell>
                   <TableCell>{s.estado}</TableCell>
                   <TableCell className="text-right space-x-1">
                     <Button size="sm" variant="outline" onClick={() => openEdit(s)}><Edit className="h-4 w-4" /></Button>
@@ -200,18 +239,18 @@ export default function SeccionesAdmin() {
                 </TableRow>
               ))}
               {filtered.length === 0 && !loading && (
-                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-6">
-                  No hay secciones en este nivel/año. Crea una con “Nueva Sección”.
+                <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-6">
+                  No hay secciones en este nivel/anio. Usa "Nueva Seccion" o "Copiar de {Number(year) - 1}".
                 </TableCell></TableRow>
               )}
             </TableBody>
           </Table>
 
-          {/* Paginación simple */}
+          {/* Paginacion simple */}
           {lastPage > 1 && (
             <div className="flex items-center justify-between mt-3">
               <div className="text-sm text-muted-foreground">
-                Página {page} de {lastPage} • {total} registros
+                Pagina {page} de {lastPage} - {total} registros
               </div>
               <div className="space-x-2">
                 <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => refresh(page - 1)}>Anterior</Button>
@@ -222,25 +261,19 @@ export default function SeccionesAdmin() {
         </CardContent>
       </Card>
 
-      <CrudFormDialog
+      <SectionFormDialog
         open={open}
         onOpenChange={setOpen}
-        title={editing ? "Editar Sección (Paralelo)" : "Nueva Sección (Paralelo)"}
-        description="Define Año, Nivel, Curso (año de escolaridad) y Paralelo. El Turno es Mañana/Tarde/Noche."
-  fields={fields}
-        initialValues={editing ?? {
-          year,
-          nivel,
-          curso: cursosPorNivel[nivel][0],
-          paralelo: "A",
-          turno: "Mañana",
-          aula: "",
-          capacidad: undefined,
-          tutor_id: "",
-          estado: "ACTIVA",
-        }}
+        editing={editing}
+        defaultYear={year}
+        defaultNivel={nivel}
         onSubmit={onSubmit}
-        submitLabel={editing ? "Actualizar" : "Crear"}
+      />
+
+      <StudentsModal
+        open={studentsModalOpen}
+        onOpenChange={setStudentsModalOpen}
+        section={selectedSectionForStudents}
       />
     </div>
   );

@@ -22,6 +22,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // ====================================================================
 // ✅ IMPORTACIÓN DEL COMPONENTE TypewriterText
@@ -57,6 +64,7 @@ import {
   Zap, 
 } from "lucide-react";
 import { toast } from "sonner";
+import { listPublicAnnouncements } from "@/services/announcementsApi";
 
 import heroImage from "@/assets/fondo4.jpg";
 import fondo3 from "@/assets/fondo3.jpg";
@@ -64,9 +72,89 @@ import fondo4 from "@/assets/fondo4.jpg";
 import fondo5 from "@/assets/fondo5.jpg";
 import fondo6 from "@/assets/fondo6.jpg";
 
+type NewsItem = {
+  t: string;
+  d: string;
+  detalle: string;
+  categoria: string;
+  imagen: string;
+  fecha: string;
+};
+
+const SAMPLE_NEWS: NewsItem[] = [
+  {
+    t: "Celebración del Día de la Madre 2025",
+    d: "Nos unimos para celebrar el amor, la dedicación y la ternura de todas las madres en su día.",
+    detalle: "La comunidad educativa comparte una jornada de reconocimiento a las madres. Este comunicado reúne la información general de la celebración y está disponible para que las familias puedan consultarla desde la página principal.",
+    categoria: "Actividad institucional",
+    imagen: fondo4,
+    fecha: "09 Mayo 2025",
+  },
+  {
+    t: "Feria de Ciencia y Tecnología",
+    d: "Participa con tu proyecto STEAM. Inscripciones abiertas.",
+    detalle: "Invitamos a los estudiantes a participar presentando proyectos de ciencia y tecnología. Las inscripciones se realizan a través de la institución; las familias pueden consultar con el área académica para conocer los requisitos y la organización de la feria.",
+    categoria: "Novedad académica",
+    imagen: fondo5,
+    fecha: "20 Sep 2024",
+  },
+  {
+    t: "Escuela para Padres",
+    d: "Talleres sobre hábitos saludables y ciudadanía digital.",
+    detalle: "Espacio dirigido a madres, padres y tutores para conversar sobre hábitos saludables y ciudadanía digital. La institución compartirá con las familias los detalles de participación y las fechas correspondientes.",
+    categoria: "Comunicado para familias",
+    imagen: fondo6,
+    fecha: "18 Sep 2024",
+  },
+];
+
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState<"login" | "features">("features");
+  const [newsItems, setNewsItems] = useState<NewsItem[]>(SAMPLE_NEWS);
+  const [newsStart, setNewsStart] = useState(0);
+  const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
+  const [allNewsOpen, setAllNewsOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    listPublicAnnouncements()
+      .then((announcements) => {
+        if (!active || announcements.length === 0) return;
+        const published = announcements.map((item, index) => {
+          const date = item.published_at ? new Date(`${item.published_at}T00:00:00`) : null;
+          return {
+            t: item.title,
+            d: item.summary,
+            detalle: item.content,
+            categoria: item.category,
+            imagen: item.image_url || [fondo4, fondo5, fondo6][index % 3],
+            fecha: date && !Number.isNaN(date.getTime())
+              ? date.toLocaleDateString("es-BO", { day: "2-digit", month: "long", year: "numeric" })
+              : "Publicado recientemente",
+          };
+        });
+        setNewsItems([...SAMPLE_NEWS, ...published]);
+      })
+      .catch((error) => console.warn("No se pudieron cargar los comunicados publicados", error));
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (newsItems.length <= 3) return;
+    const timer = window.setInterval(() => {
+      setNewsStart((current) => current >= newsItems.length - 3 ? 0 : current + 1);
+    }, 6000);
+    return () => window.clearInterval(timer);
+  }, [newsItems.length]);
+
+  const moveNews = (direction: -1 | 1) => {
+    const lastStart = Math.max(0, newsItems.length - 3);
+    setNewsStart((current) => direction < 0
+      ? (current <= 0 ? lastStart : current - 1)
+      : (current >= lastStart ? 0 : current + 1));
+  };
+  const visibleNews = newsItems.slice(newsStart, newsStart + 3);
 
   // ------------ HERO CAROUSEL DATA & STATES ------------
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -1023,27 +1111,21 @@ const Index = () => {
               </p>
             </div>
 
+            {newsItems.length > 3 && (
+              <div className="max-w-6xl mx-auto mb-5 flex items-center justify-end gap-3">
+                <span className="mr-auto text-sm text-slate-500" aria-live="polite">
+                  Noticias {newsStart + 1}–{Math.min(newsStart + 3, newsItems.length)} de {newsItems.length}
+                </span>
+                <Button variant="outline" size="icon" onClick={() => moveNews(-1)} aria-label="Noticias anteriores">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" onClick={() => moveNews(1)} aria-label="Siguientes noticias">
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-              {[
-                {
-                  t: "Celebración del Día de la Madre 2025",
-                  d: "Nos unimos para celebrar el amor, la dedicación y la ternura de todas las madres en su día.",
-                  imagen: "/src/assets/fondo4.jpg",
-                  fecha: "09 Mayo 2025"
-                },
-                {
-                  t: "Feria de Ciencia y Tecnología", 
-                  d: "Participa con tu proyecto STEAM. Inscripciones abiertas.",
-                  imagen: "/src/assets/fondo5.jpg",
-                  fecha: "20 Sep 2024"
-                },
-                {
-                  t: "Escuela para Padres",
-                  d: "Talleres sobre hábitos saludables y ciudadanía digital.",
-                  imagen: "/src/assets/fondo6.jpg",
-                  fecha: "18 Sep 2024"
-                },
-              ].map((n, i) => (
+              {visibleNews.map((n, i) => (
                 <div key={i} className="group cursor-pointer">
                   {/* Tarjeta con efecto hover */}
                   <div className="relative h-96 rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-500">
@@ -1058,14 +1140,14 @@ const Index = () => {
                     <div className="absolute bottom-0 left-0 right-0 p-6 bg-white/90 backdrop-blur-sm transform translate-y-0 group-hover:-translate-y-full opacity-100 group-hover:opacity-0 transition-all duration-500">
                       <div className="flex items-start gap-3">
                         <div className="bg-purple-600 text-white px-3 py-2 rounded-lg text-center min-w-16">
-                          <div className="text-xs font-bold uppercase">MAYO</div>
-                          <div className="text-lg font-bold">09</div>
+                          <div className="text-xs font-bold uppercase">{n.categoria.slice(0, 8)}</div>
+                          <div className="text-xs font-bold">{n.fecha.split(" ").slice(0, 2).join(" ")}</div>
                         </div>
                         <div className="flex-1">
                           <h3 className="text-lg font-bold text-slate-800 mb-1 line-clamp-2">
                             {n.t}
                           </h3>
-                          <Button variant="ghost" size="sm" className="text-purple-600 hover:text-purple-700 p-0 h-auto font-semibold">
+                          <Button variant="ghost" size="sm" onClick={() => setSelectedNews(n)} className="text-purple-600 hover:text-purple-700 p-0 h-auto font-semibold">
                             Ver más...
                           </Button>
                         </div>
@@ -1086,7 +1168,7 @@ const Index = () => {
                         <p className="text-white/90 leading-relaxed mb-4">
                           {n.d}
                         </p>
-                        <Button className="bg-white/20 hover:bg-white/30 text-white border-white/30 hover:border-white/50 backdrop-blur-sm transition-all duration-300 group/btn">
+                        <Button onClick={() => setSelectedNews(n)} className="bg-white/20 hover:bg-white/30 text-white border-white/30 hover:border-white/50 backdrop-blur-sm transition-all duration-300 group/btn">
                           <span>Ver más...</span>
                           <ArrowRight className="h-4 w-4 ml-2 group-hover/btn:translate-x-1 transition-transform duration-300" />
                         </Button>
@@ -1099,13 +1181,60 @@ const Index = () => {
 
             {/* Botón para ver más noticias */}
             <div className="text-center mt-12">
-              <Button className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl px-8 py-6 transition-all duration-300 group">
+              <Button onClick={() => setAllNewsOpen(true)} className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl px-8 py-6 transition-all duration-300 group">
                 <span className="mr-2">Ver todas las noticias</span>
                 <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform duration-300" />
               </Button>
             </div>
           </div>
         </section>
+
+        <Dialog open={Boolean(selectedNews)} onOpenChange={(open) => { if (!open) setSelectedNews(null); }}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            {selectedNews && (
+              <>
+                <img src={selectedNews.imagen} alt={selectedNews.t} className="w-full h-56 object-cover rounded-lg" />
+                <DialogHeader>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-100">{selectedNews.categoria}</Badge>
+                    <span className="text-sm text-muted-foreground">{selectedNews.fecha}</span>
+                  </div>
+                  <DialogTitle className="text-2xl">{selectedNews.t}</DialogTitle>
+                  <DialogDescription className="text-base leading-relaxed">{selectedNews.d}</DialogDescription>
+                </DialogHeader>
+                <div className="rounded-lg bg-slate-50 p-4 text-slate-700 leading-relaxed">
+                  <h3 className="font-semibold text-slate-900 mb-2">Detalles del comunicado</h3>
+                  <p>{selectedNews.detalle}</p>
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={allNewsOpen} onOpenChange={setAllNewsOpen}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-2xl">Comunicados y Novedades</DialogTitle>
+              <DialogDescription>Consulta los detalles de los comunicados publicados.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              {newsItems.map((news) => (
+                <article key={news.t} className="flex flex-col sm:flex-row gap-4 rounded-lg border p-4">
+                  <img src={news.imagen} alt={news.t} className="w-full sm:w-40 h-32 object-cover rounded-md" />
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-100">{news.categoria}</Badge>
+                      <span className="text-xs text-muted-foreground">{news.fecha}</span>
+                    </div>
+                    <h3 className="font-semibold text-slate-900">{news.t}</h3>
+                    <p className="text-sm text-slate-600">{news.d}</p>
+                    <p className="text-sm leading-relaxed text-slate-700">{news.detalle}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* ===================== CONTACTO ===================== */}
         <section id="contact" className="py-20 bg-white" style={{ scrollMarginTop: 120 }}>

@@ -1,633 +1,819 @@
 // src/pages/admin/Estudiantes.tsx
-import { useEffect, useMemo, useState } from "react";
+// Gestión de Estudiantes conectado a Backend Laravel
+
+import { useEffect, useMemo, useState, useCallback, Component, ErrorInfo, ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Search, Edit, Trash2, RefreshCw, KeyRound, Info, Clipboard, AlertTriangle } from "lucide-react";
-import CrudFormDialog from "@/pages/admin/CrudFormDialog";
-import { pushAudit } from "@/lib/audit";
-
-// Catálogo local (fallback) y tipo de nivel
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { 
+  Plus, Search, Edit, Trash2, RefreshCw, KeyRound, 
+  Loader2, Users, GraduationCap, UserCheck, UserX, ChevronLeft, ChevronRight, Copy, AlertTriangle
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { 
+  getStudents, createStudent, updateStudent, deleteStudent,
+  Student, StudentFormData, StudentFilters, PaginatedResponse
+} from "@/services/studentApi";
+import { getCursos, getParalelos } from "@/services/sectionsApi";
 import { cursosPorNivel } from "@/lib/sections";
 import type { NivelKey } from "@/lib/sections";
 
-// API: cursos/paralelos reales desde Laravel
-import { getCursos, getParalelos } from "@/services/sectionsApi";
+// Error Boundary para capturar errores
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
 
-const DEBUG = true;
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
 
-type Estudiante = {
-  id: number;
-  nombres: string;
-  apellidos: string;
-  nivel: NivelKey;     // inicial | primaria | secundaria
-  curso: string;       // p.ej. "3ro Primaria"
-  paralelo: string;    // p.ej. "A"
-  activo: boolean;
-  correo: string;
-  // RUDE/código interno (provisional: lo reemplaza el backend real)
-  codigo: string;
-  // credenciales
-  usuario: string;
-  passwordTemp: string;
-  anioIngreso: string; // "2025"
-  // datos opcionales
-  fechaNac?: string;
-  sexo?: "M" | "F";
-};
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
 
-const STORAGE_KEY = "adm:students";
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Error capturado por ErrorBoundary:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 text-center">
+          <AlertTriangle className="h-16 w-16 mx-auto text-red-500 mb-4" />
+          <h2 className="text-xl font-bold text-red-600 mb-2">Error en el módulo</h2>
+          <p className="text-gray-600 mb-4">Algo salió mal al cargar los estudiantes.</p>
+          <pre className="bg-red-50 text-red-800 p-4 rounded text-left text-sm overflow-auto max-h-40">
+            {this.state.error?.message}
+          </pre>
+          <Button 
+            className="mt-4" 
+            onClick={() => this.setState({ hasError: false, error: null })}
+          >
+            Intentar de nuevo
+          </Button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 const YEAR_KEY = "adm:year";
-const TERM_KEY = "adm:term";
 const NIVEL_KEY = "adm:nivel";
 
-// ---------- helpers ----------
-const stripAccents = (s: string) =>
-  s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\p{L}\p{N}\s'-]/gu, "");
+function EstudiantesContent() {
+  const { toast } = useToast();
+  
+  // Configuración global
+  const [year, setYear] = useState<string>(localStorage.getItem(YEAR_KEY) || String(new Date().getFullYear()));
+  const [nivel, setNivel] = useState<NivelKey>((localStorage.getItem(NIVEL_KEY) as NivelKey) || "primaria");
 
-const firstToken = (s: string) => stripAccents(s).trim().split(/\s+|-/)[0] || "";
+  // Estado de datos
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [totalPages, setTotalPages] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
-const toSlug = (s: string) =>
-  stripAccents(s)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ".")
-    .replace(/(^\.)|(\.$)/g, "");
+  // Filtros
+  const [curso, setCurso] = useState<string>("");
+  const [paralelo, setParalelo] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterActivo, setFilterActivo] = useState<string>("todos");
 
-function buildUsername(baseApellido: string, baseNombre: string, existing: string[]): string {
-  const base = `${firstToken(baseApellido)}.${firstToken(baseNombre)}`.toLowerCase();
-  const core = toSlug(base);
-  if (!core) return `user${existing.length + 1}`;
-  let candidate = core;
-  let i = 2;
-  while (existing.includes(candidate)) {
-    candidate = `${core}.${i}`;
-    i++;
-  }
-  return candidate;
-}
-const pad6 = (n: number | string) => String(n).slice(-6).padStart(6, "0");
-const yearFromCodigo = (codigo: string) => {
-  const m = codigo.match(/EST-(\d{4})-/);
-  return m ? m[1] : String(new Date().getFullYear());
-};
+  // Catálogos
+  const [cursosDisponibles, setCursosDisponibles] = useState<string[]>([]);
+  const [paralelosDisponibles, setParalelosDisponibles] = useState<string[]>([]);
 
-// ---------- componente ----------
-export default function AdminEstudiantes() {
-  // Año/Nivel vivos (escuchan cambios del panel Admin)
-  const [year, setYear] = useState<string>(
-    localStorage.getItem(YEAR_KEY) || String(new Date().getFullYear())
-  );
-  const globalTerm = localStorage.getItem(TERM_KEY) || "T1";
-  const [nivel, setNivel] = useState<NivelKey>(
-    ((localStorage.getItem(NIVEL_KEY) as NivelKey) || "primaria")
-  );
+  // Modales
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isCredentialsDialogOpen, setIsCredentialsDialogOpen] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [newCredentials, setNewCredentials] = useState<{ usuario: string; password: string } | null>(null);
 
-  // Sincronizar cuando cambie localStorage (otra pestaña) o al volver el foco
+  // Formulario
+  const [formData, setFormData] = useState<StudentFormData>({
+    nombres: "",
+    apellidos: "",
+    nivel: "primaria",
+    curso: "",
+    paralelo: "",
+    email: "",
+    fecha_nac: "",
+    sexo: undefined,
+    anio_ingreso: year,
+    mes_ingreso: String(new Date().getMonth() + 1).padStart(2, "0"),
+  });
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  // Sincronizar año/nivel con localStorage
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === YEAR_KEY && e.newValue && e.newValue !== year) setYear(e.newValue);
-      if (e.key === NIVEL_KEY && e.newValue && e.newValue !== nivel) setNivel(e.newValue as NivelKey);
-    };
-    const onFocus = () => {
-      const y = localStorage.getItem(YEAR_KEY);
-      if (y && y !== year) setYear(y);
-      const nv = localStorage.getItem(NIVEL_KEY) as NivelKey | null;
-      if (nv && nv !== nivel) setNivel(nv);
+      if (e.key === YEAR_KEY && e.newValue) setYear(e.newValue);
+      if (e.key === NIVEL_KEY && e.newValue) setNivel(e.newValue as NivelKey);
     };
     window.addEventListener("storage", onStorage);
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [year, nivel]);
-
-  // Cursos/paralelos desde API (fallback al catálogo local si aún no hay secciones reales)
-  const [cursosDispon, setCursosDispon] = useState<string[]>([]);
-  const [paralelosDispon, setParalelosDispon] = useState<string[]>([]);
-
-  // Cargar cursos reales por año+nivel
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        DEBUG && console.groupCollapsed("[API] list cursos");
-        DEBUG && console.log("→ GET /api/sections (distinct cursos)", { year, nivel });
-        const cursos = await getCursos(year, nivel);
-        if (!alive) return;
-        setCursosDispon(cursos.length ? cursos : cursosPorNivel[nivel]);
-        DEBUG && console.log("✔ cursos (desde DB):", cursos);
-        if (!cursos.length) {
-          DEBUG && console.log("⚠ fallback catálogo local:", cursosPorNivel[nivel]);
-        }
-        DEBUG && console.groupEnd();
-      } catch (err) {
-        DEBUG && console.groupCollapsed("[API] list cursos — ERROR");
-        DEBUG && console.error(err);
-        setCursosDispon(cursosPorNivel[nivel]);
-        DEBUG && console.log("⚠ fallback catálogo local:", cursosPorNivel[nivel]);
-        DEBUG && console.groupEnd();
-      }
-    })();
-    return () => { alive = false; };
-  }, [year, nivel]);
-
-  // curso/paralelo seleccionados
-  const [curso, setCurso] = useState<string>("");
-  useEffect(() => {
-    if (cursosDispon.length) {
-      setCurso(cursosDispon[0]);
-      DEBUG && console.log("[UI] curso seleccionado por defecto:", cursosDispon[0]);
-    }
-  }, [cursosDispon]);
-
-  // Cargar paralelos reales por año+nivel+curso
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!curso) { setParalelosDispon([]); return; }
-      try {
-        DEBUG && console.groupCollapsed("[API] list paralelos");
-        DEBUG && console.log("→ GET /api/sections (paralelos)", { year, nivel, curso });
-        const paralelos = await getParalelos(year, nivel, curso);
-        if (!alive) return;
-        setParalelosDispon(paralelos.length ? paralelos : ["A","B","C"]);
-        DEBUG && console.log("✔ paralelos (desde DB):", paralelos);
-        if (!paralelos.length) {
-          DEBUG && console.log("⚠ fallback ['A','B','C']");
-        }
-        DEBUG && console.groupEnd();
-      } catch (err) {
-        DEBUG && console.groupCollapsed("[API] list paralelos — ERROR");
-        DEBUG && console.error(err);
-        setParalelosDispon(["A","B","C"]);
-        DEBUG && console.log("⚠ fallback ['A','B','C']");
-        DEBUG && console.groupEnd();
-      }
-    })();
-    return () => { alive = false; };
-  }, [year, nivel, curso]);
-
-  const [paralelo, setParalelo] = useState<string>("");
-  useEffect(() => {
-    if (paralelosDispon.length) {
-      setParalelo(paralelosDispon[0]);
-      DEBUG && console.log("[UI] paralelo seleccionado por defecto:", paralelosDispon[0]);
-    }
-  }, [paralelosDispon]);
-
-  const [q, setQ] = useState("");
-
-  // datos (localStorage por ahora)
-  const [rows, setRows] = useState<Estudiante[]>([]);
-
-  // carga + migración (grado/seccion → curso/paralelo) + credenciales
-  useEffect(() => {
-    DEBUG && console.groupCollapsed("[DATA] carga inicial estudiantes");
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      DEBUG && console.log("↳ desde localStorage", { key: STORAGE_KEY });
-      const parsed = JSON.parse(raw) as Partial<Estudiante | any>[];
-      const fixed = ensureCredentialsAndMigrate(parsed);
-      setRows(fixed);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(fixed));
-      DEBUG && console.log("✔ normalizados:", fixed);
-    } else {
-      DEBUG && console.log("↳ sin datos: seeding de prueba");
-      const seed: Partial<Estudiante>[] = [
-        { id: 1, nombres: "Juan",  apellidos: "Pérez Martínez", nivel: "primaria", curso: "3ro Primaria", paralelo: "A", activo: true, correo: "juan@colegio.edu",  codigo: "EST-2025-001", fechaNac: "2014-05-09", sexo:"M" },
-        { id: 2, nombres: "María", apellidos: "Gómez Quispe",   nivel: "primaria", curso: "3ro Primaria", paralelo: "B", activo: true, correo: "maria@colegio.edu", codigo: "EST-2025-002", fechaNac: "2014-01-20", sexo:"F" },
-        { id: 3, nombres: "Luis",  apellidos: "Rojas",           nivel: "secundaria", curso: "1ro Secundaria", paralelo: "A", activo: true, correo: "luis@colegio.edu",  codigo: "EST-2025-003", fechaNac: "2011-11-03", sexo:"M" },
-      ];
-      const seeded = ensureCredentialsAndMigrate(seed);
-      setRows(seeded);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-      DEBUG && console.log("✔ seeded:", seeded);
-    }
-    DEBUG && console.groupEnd();
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  const save = (next: Estudiante[]) => {
-    setRows(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    DEBUG && console.log("[DATA] save localStorage:", { key: STORAGE_KEY, count: next.length });
-  };
+  // Cargar cursos disponibles
+  useEffect(() => {
+    const loadCursos = async () => {
+      try {
+        const cursos = await getCursos(year, nivel);
+        setCursosDisponibles(cursos.length ? cursos : cursosPorNivel[nivel] || []);
+      } catch (error) {
+        console.error("Error cargando cursos:", error);
+        setCursosDisponibles(cursosPorNivel[nivel] || []);
+      }
+    };
+    loadCursos();
+  }, [year, nivel]);
 
-  const list = useMemo(() => {
-    const out = rows.filter((r) =>
-      (!nivel || r.nivel === nivel) &&
-      (!curso || r.curso === curso) &&
-      (!paralelo || r.paralelo === paralelo) &&
-      (`${r.nombres} ${r.apellidos} ${r.codigo} ${r.usuario}`.toLowerCase().includes(q.toLowerCase()))
-    );
-    DEBUG && console.log("[UI] filtro lista", { nivel, curso, paralelo, q, resultados: out.length });
-    return out;
-  }, [rows, nivel, curso, paralelo, q]);
-
-  // ---------- CRUD ----------
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<Estudiante | null>(null);
-
-  const openCreate = () => { setEditing(null); setOpen(true); DEBUG && console.log("[UI] abrir diálogo crear"); };
-  const openEdit = (row: Estudiante) => { setEditing(row); setOpen(true); DEBUG && console.log("[UI] abrir diálogo editar", row); };
-
-  const nextId = () => rows.length ? Math.max(...rows.map(r => r.id)) + 1 : 1;
-  const makeCodigo = (id: number, yearX: string) => `EST-${yearX}-${String(id).padStart(3, "0")}`;
-
-  const onSubmit = (vals: any) => {
-    const nv: NivelKey = nivel; // bloqueado por filtro superior
-    const cursoVal = (vals.curso && cursosDispon.includes(vals.curso))
-      ? vals.curso
-      : (cursosDispon[0] || cursosPorNivel[nv][0]);
-
-    // Paralelos válidos (de API si hay; si no, catálogo "A/B/C")
-    const paralelosValidos = paralelosDispon.length ? paralelosDispon : ["A","B","C"];
-    const paraleloVal = paralelosValidos.includes(vals.paralelo) ? vals.paralelo : paralelosValidos[0];
-
-    const anioIngreso = String(vals.anioIngreso || year);
-
-    if (!vals.nombres?.trim() || !vals.apellidos?.trim() || !vals.correo?.trim()) {
-      alert("Completa Nombres, Apellidos y Correo.");
+  // Cargar paralelos disponibles
+  useEffect(() => {
+    if (!curso) {
+      setParalelosDisponibles([]);
       return;
     }
-    if (vals.fechaNac && !/^\d{4}-\d{2}-\d{2}$/.test(vals.fechaNac)) {
-      alert("Fecha de nacimiento inválida (usa YYYY-MM-DD).");
-      return;
-    }
-    if (vals.sexo && !["M","F"].includes(vals.sexo)) {
-      alert("Sexo inválido (M/F).");
-      return;
-    }
+    const loadParalelos = async () => {
+      try {
+        const paralelos = await getParalelos(year, nivel, curso);
+        setParalelosDisponibles(paralelos.length ? paralelos : ["A", "B", "C"]);
+      } catch (error) {
+        console.error("Error cargando paralelos:", error);
+        setParalelosDisponibles(["A", "B", "C"]);
+      }
+    };
+    loadParalelos();
+  }, [year, nivel, curso]);
 
-    if (editing) {
-      const payload = { ...editing, ...vals, nivel: nv, curso: cursoVal, paralelo: paraleloVal, anioIngreso };
-      DEBUG && console.groupCollapsed("[CRUD] actualizar estudiante (LOCAL)");
-      DEBUG && console.log("payload:", payload);
-      const updated = rows.map(r => r.id === editing.id ? payload : r);
-      save(updated);
-      pushAudit("student:update", { id: editing.id, vals });
-      DEBUG && console.log("✔ actualizado (localStorage)");
-      DEBUG && console.groupEnd();
-    } else {
-      const id = nextId();
-      const codigo = makeCodigo(id, anioIngreso); // RUDE real lo dará tu backend
-      const existingUsers = rows.map(r => r.usuario);
-      const usuario = buildUsername(vals.apellidos, vals.nombres, existingUsers);
-      const numeroReg6 = pad6(id);
-      const passwordTemp = `${anioIngreso}${numeroReg6}`;
-
-      const nuevo: Estudiante = {
-        id,
-        nombres: vals.nombres,
-        apellidos: vals.apellidos,
-        correo: vals.correo,
-        nivel: nv,
-        curso: cursoVal,
-        paralelo: paraleloVal,
-        activo: Boolean(vals.activo ?? true),
-        codigo,
-        usuario,
-        passwordTemp,
-        anioIngreso,
-        fechaNac: vals.fechaNac || undefined,
-        sexo: vals.sexo || undefined,
+  // Cargar estudiantes
+  const loadStudents = useCallback(async () => {
+    setLoading(true);
+    try {
+      const filters: StudentFilters = {
+        nivel,
+        page: currentPage,
+        per_page: 25,
       };
+      if (curso) filters.curso = curso;
+      if (paralelo) filters.paralelo = paralelo;
+      if (searchQuery) filters.q = searchQuery;
+      if (filterActivo !== "todos") filters.activo = filterActivo === "activos";
 
-      DEBUG && console.groupCollapsed("[CRUD] crear estudiante (LOCAL)");
-      DEBUG && console.log("payload:", nuevo);
-      const next = [nuevo, ...rows];
-      save(next);
-      pushAudit("student:create", { id, usuario });
-      DEBUG && console.log("✔ creado (localStorage)");
-      DEBUG && console.groupEnd();
-
-      // Si ya tienes endpoint Laravel para estudiantes, aquí podrías hacer:
-      // try {
-      //   DEBUG && console.groupCollapsed("[API] POST /api/students");
-      //   const res = await apiCreateStudent(nuevo);
-      //   DEBUG && console.log("✔ creado en DB:", res);
-      //   DEBUG && console.groupEnd();
-      // } catch (err) {
-      //   DEBUG && console.error("✖ error creando en DB:", err);
-      // }
-      navigator.clipboard?.writeText(`Usuario: ${usuario}\nContraseña: ${passwordTemp}`).catch(() => {});
-      alert(`Estudiante creado.\n\nUsuario: ${usuario}\nContraseña temporal: ${passwordTemp}\n\n(Se copió al portapapeles si el navegador lo permite)`);
+      const response: PaginatedResponse<Student> = await getStudents(filters);
+      setStudents(response?.data || []);
+      setTotalPages(response?.last_page || 1);
+      setTotal(response?.total || 0);
+    } catch (error: unknown) {
+      console.error("Error cargando estudiantes:", error);
+      // No bloquear la UI, mostrar lista vacía
+      setStudents([]);
+      setTotalPages(1);
+      setTotal(0);
+      const err = error as { response?: { data?: { message?: string } } };
+      toast({
+        title: "Error",
+        description: err?.response?.data?.message || "No se pudieron cargar los estudiantes",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
-    setOpen(false);
+  }, [nivel, curso, paralelo, searchQuery, filterActivo, currentPage, toast]);
+
+  useEffect(() => {
+    loadStudents();
+  }, [loadStudents]);
+
+  // Estadísticas
+  const stats = useMemo(() => ({
+    total,
+    activos: students.filter(s => s.activo).length,
+    inactivos: students.filter(s => !s.activo).length,
+  }), [students, total]);
+
+  // Abrir modal crear
+  const openCreate = () => {
+    setSelectedStudent(null);
+    setFormData({
+      nombres: "",
+      apellidos: "",
+      nivel,
+      curso: curso || cursosDisponibles[0] || "",
+      paralelo: paralelo || paralelosDisponibles[0] || "A",
+      email: "",
+      fecha_nac: "",
+      sexo: undefined,
+      anio_ingreso: year,
+      mes_ingreso: String(new Date().getMonth() + 1).padStart(2, "0"),
+    });
+    setFormErrors({});
+    setIsDialogOpen(true);
   };
 
-  const toggleActivo = (id: number) => {
-    DEBUG && console.groupCollapsed("[CRUD] toggle activo (LOCAL)");
-    const next = rows.map(r => r.id === id ? ({ ...r, activo: !r.activo }) : r);
-    save(next);
-    pushAudit("student:toggle", { id });
-    DEBUG && console.log("✔ toggled id:", id);
-    DEBUG && console.groupEnd();
+  // Abrir modal editar
+  const openEdit = (student: Student) => {
+    setSelectedStudent(student);
+    setFormData({
+      nombres: student.nombres,
+      apellidos: student.apellidos,
+      nivel: student.nivel,
+      curso: student.curso,
+      paralelo: student.paralelo,
+      email: student.email || "",
+      fecha_nac: student.fecha_nac || "",
+      sexo: student.sexo || undefined,
+      anio_ingreso: student.anio_ingreso,
+      mes_ingreso: student.mes_ingreso || "01",
+      activo: student.activo,
+    });
+    setFormErrors({});
+    setIsDialogOpen(true);
   };
 
-  const resetPass = (id: number) => {
-    const s = rows.find(r => r.id === id);
-    if (!s) return;
-    const numeroReg6 = pad6(s.id);
-    const newPass = `${s.anioIngreso || yearFromCodigo(s.codigo)}${numeroReg6}`;
-    const next = rows.map(r => r.id === id ? ({ ...r, passwordTemp: newPass }) : r);
-    save(next);
-    pushAudit("student:resetpass", { id });
-    DEBUG && console.log("[CRUD] reset pass (LOCAL)", { id, newPass });
-
-    navigator.clipboard?.writeText(`Usuario: ${s.usuario}\nNueva contraseña: ${newPass}`).catch(() => {});
-    alert(`Contraseña regenerada.\n\nUsuario: ${s.usuario}\nNueva contraseña: ${newPass}\n\n(Se copió al portapapeles si el navegador lo permite)`);
+  // Validar formulario
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    if (!formData.nombres.trim()) errors.nombres = "Nombres requeridos";
+    if (!formData.apellidos.trim()) errors.apellidos = "Apellidos requeridos";
+    if (!formData.curso) errors.curso = "Selecciona un curso";
+    if (!formData.paralelo) errors.paralelo = "Selecciona un paralelo";
+    if (!formData.anio_ingreso) errors.anio_ingreso = "Año de ingreso requerido";
+    if (!formData.mes_ingreso) errors.mes_ingreso = "Mes de ingreso requerido";
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
-  const showCreds = (id: number) => {
-    const s = rows.find(r => r.id === id);
-    if (!s) return;
-    DEBUG && console.log("[UI] mostrar credenciales", { id, usuario: s.usuario, passwordTemp: s.passwordTemp });
-    navigator.clipboard?.writeText(`Usuario: ${s.usuario}\nContraseña: ${s.passwordTemp}`).catch(() => {});
-    alert(`Credenciales:\n\nUsuario: ${s.usuario}\nContraseña temporal: ${s.passwordTemp}\n\n(Se copió al portapapeles si el navegador lo permite)`);
+  // Guardar estudiante
+  const handleSave = async () => {
+    if (!validateForm()) return;
+    setSaving(true);
+    try {
+      if (selectedStudent) {
+        // Actualizar
+        await updateStudent(selectedStudent.id, formData);
+        toast({ title: "✅ Estudiante actualizado" });
+      } else {
+        // Crear
+        const result = await createStudent(formData);
+        setNewCredentials({
+          usuario: result.student.usuario || "",
+          password: result.password_temp,
+        });
+        setIsCredentialsDialogOpen(true);
+        toast({ title: "✅ Estudiante creado exitosamente" });
+      }
+      setIsDialogOpen(false);
+      loadStudents();
+    } catch (error: unknown) {
+      console.error("Error guardando:", error);
+      const err = error as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } };
+      const emailAlreadyUsed = Boolean(err.response?.data?.errors?.email?.length);
+      if (emailAlreadyUsed) {
+        setFormErrors((current) => ({
+          ...current,
+          email: "Este correo ya está registrado. Ingresa otro correo.",
+        }));
+      }
+      toast({
+        title: "Error",
+        description: emailAlreadyUsed
+          ? "Ese correo ya está registrado en otra cuenta. Usa otro correo o deja el campo vacío."
+          : err.response?.data?.message || "No se pudo guardar el estudiante",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const remove = (id: number) => {
-    if (!confirm("¿Eliminar estudiante?")) return;
-    DEBUG && console.groupCollapsed("[CRUD] eliminar estudiante (LOCAL)");
-    const next = rows.filter(r => r.id !== id);
-    save(next);
-    pushAudit("student:delete", { id });
-    DEBUG && console.log("✔ eliminado id:", id);
-    DEBUG && console.groupEnd();
+  // Eliminar estudiante
+  const handleDelete = async () => {
+    if (!selectedStudent) return;
+    try {
+      await deleteStudent(selectedStudent.id);
+      toast({ title: "✅ Estudiante eliminado" });
+      setIsDeleteDialogOpen(false);
+      loadStudents();
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { message?: string } } };
+      toast({
+        title: "Error",
+        description: err.response?.data?.message || "No se pudo eliminar",
+        variant: "destructive",
+      });
+    }
   };
 
-  // Campos del diálogo
-  const dialogFields = [
-    { type: "text", name: "nombres", label: "Nombres", required: true },
-    { type: "text", name: "apellidos", label: "Apellidos", required: true },
-    { type: "email", name: "correo", label: "Correo", required: true },
-    { type: "date", name: "fechaNac", label: "Fecha de nacimiento (opcional)" },
-    { type: "select", name: "sexo", label: "Sexo (opcional)", options: [{ value:"M", label:"Masculino" }, { value:"F", label:"Femenino" }] },
-    { type: "select", name: "nivel", label: "Nivel (usa el filtro superior)", options: (["inicial","primaria","secundaria"] as NivelKey[]).map(n => ({ value: n, label: n[0].toUpperCase()+n.slice(1) })), disabled: true },
-    { type: "select", name: "curso", label: "Curso (año de escolaridad)", options: cursosDispon.map(c => ({ value: c, label: c })) },
-    { type: "select", name: "paralelo", label: "Paralelo", options: paralelosDispon.map(p => ({ value: p, label: p })) },
-    { type: "text", name: "anioIngreso", label: "Año de ingreso", required: true, note: "Usado para generar la contraseña temporal" },
-    { type: "switch", name: "activo", label: "Activo", note: "Habilita el acceso del estudiante" },
-  ] as const;
+  // Copiar credenciales
+  const copyCredentials = () => {
+    if (!newCredentials) return;
+    const text = `Usuario: ${newCredentials.usuario}\nContraseña: ${newCredentials.password}`;
+    navigator.clipboard.writeText(text);
+    toast({ title: "📋 Credenciales copiadas al portapapeles" });
+  };
 
-  // Nota si no existen secciones reales (API vacía)
-  const sinSeccionesReales = useMemo(() => {
-    const flag = cursosDispon.length === 0 || (cursosDispon[0] && cursosPorNivel[nivel].includes(cursosDispon[0]));
-    DEBUG && console.log("[UI] sinSeccionesReales:", flag, { year, nivel, cursosDispon });
-    return flag;
-  }, [cursosDispon, nivel]);
+  // Ver credenciales de estudiante existente
+  const showCredentials = (student: Student) => {
+    setNewCredentials({
+      usuario: student.usuario || student.codigo,
+      password: student.password_temp || "********",
+    });
+    setIsCredentialsDialogOpen(true);
+  };
 
   return (
-    <div className="space-y-6 p-4">
+    <div className="space-y-6 p-4 min-h-screen bg-background">
+      {/* Header */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+            <GraduationCap className="h-7 w-7 text-blue-600" />
+            Gestión de Estudiantes — {nivel.toUpperCase()} {year}
+          </h1>
+          <p className="text-muted-foreground">
+            Administra la información de los estudiantes del colegio
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={loadStudents} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            Actualizar
+          </Button>
+          <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={openCreate}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nuevo Estudiante
+          </Button>
+        </div>
+      </div>
+
+      {/* Estadísticas */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Total Estudiantes</p>
+              <p className="text-2xl font-bold">{stats.total}</p>
+            </div>
+            <div className="p-2 bg-blue-100 rounded-full">
+              <Users className="h-5 w-5 text-blue-600" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Activos</p>
+              <p className="text-2xl font-bold text-green-600">{stats.activos}</p>
+            </div>
+            <div className="p-2 bg-green-100 rounded-full">
+              <UserCheck className="h-5 w-5 text-green-600" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Inactivos</p>
+              <p className="text-2xl font-bold text-red-600">{stats.inactivos}</p>
+            </div>
+            <div className="p-2 bg-red-100 rounded-full">
+              <UserX className="h-5 w-5 text-red-600" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">En esta página</p>
+              <p className="text-2xl font-bold">{students.length}</p>
+            </div>
+            <div className="p-2 bg-purple-100 rounded-full">
+              <GraduationCap className="h-5 w-5 text-purple-600" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filtros */}
       <Card>
-        <CardHeader>
-          <CardTitle>Estudiantes — {year} {globalTerm}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={nivel}
-              onValueChange={(v) => {
-                const nv = v as NivelKey;
-                setNivel(nv);
-                localStorage.setItem(NIVEL_KEY, nv);
-                DEBUG && console.log("[UI] cambio nivel:", nv);
-              }}
-            >
-              <SelectTrigger className="w-[160px]">
+        <CardContent className="p-4">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+            <Select value={nivel} onValueChange={(v) => { setNivel(v as NivelKey); localStorage.setItem(NIVEL_KEY, v); setCurso(""); setParalelo(""); setCurrentPage(1); }}>
+              <SelectTrigger>
                 <SelectValue placeholder="Nivel" />
               </SelectTrigger>
               <SelectContent>
-                {(["inicial","primaria","secundaria"] as NivelKey[]).map((n) => (
-                  <SelectItem key={n} value={n}>
-                    {n[0].toUpperCase() + n.slice(1)}
-                  </SelectItem>
-                ))}
+                <SelectItem value="inicial">Inicial</SelectItem>
+                <SelectItem value="primaria">Primaria</SelectItem>
+                <SelectItem value="secundaria">Secundaria</SelectItem>
               </SelectContent>
             </Select>
-
-            <Select value={curso} onValueChange={(v)=>{ setCurso(v); DEBUG && console.log("[UI] cambio curso:", v); }}>
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Curso (año)" />
+            <Select value={curso || "__all__"} onValueChange={(v) => { setCurso(v === "__all__" ? "" : v); setParalelo(""); setCurrentPage(1); }}>
+              <SelectTrigger>
+                <SelectValue placeholder="Todos los cursos" />
               </SelectTrigger>
               <SelectContent>
-                {cursosDispon.map((c) => (
+                <SelectItem value="__all__">Todos los cursos</SelectItem>
+                {cursosDisponibles.map(c => (
                   <SelectItem key={c} value={c}>{c}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-
-            <Select value={paralelo} onValueChange={(v)=>{ setParalelo(v); DEBUG && console.log("[UI] cambio paralelo:", v); }}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Paralelo" />
+            <Select value={paralelo || "__all__"} onValueChange={(v) => { setParalelo(v === "__all__" ? "" : v); setCurrentPage(1); }}>
+              <SelectTrigger>
+                <SelectValue placeholder="Todos los paralelos" />
               </SelectTrigger>
               <SelectContent>
-                {paralelosDispon.map((p) => (
+                <SelectItem value="__all__">Todos los paralelos</SelectItem>
+                {paralelosDisponibles.map(p => (
                   <SelectItem key={p} value={p}>{p}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-
-            <div className="relative">
-              <Search className="h-4 w-4 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="pl-8 w-[280px]"
-                placeholder="Buscar por nombre, código o usuario"
-                value={q}
-                onChange={(e) => { setQ(e.target.value); DEBUG && console.log("[UI] cambio query:", e.target.value); }}
-              />
+            <Select value={filterActivo} onValueChange={(v) => { setFilterActivo(v); setCurrentPage(1); }}>
+              <SelectTrigger>
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos</SelectItem>
+                <SelectItem value="activos">Activos</SelectItem>
+                <SelectItem value="inactivos">Inactivos</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="md:col-span-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por nombre, apellido o código..."
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                  className="pl-10"
+                />
+              </div>
             </div>
-
-            <Button variant="secondary" onClick={openCreate}>
-              <Plus className="h-4 w-4 mr-2" /> Nuevo
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                DEBUG && console.groupCollapsed("[DATA] Reset seeds (LOCAL)");
-                const seed: Partial<Estudiante>[] = [
-                  { id: 1, nombres: "Juan",  apellidos: "Pérez Martínez", nivel: "primaria", curso: "3ro Primaria", paralelo: "A", activo: true, correo: "juan@colegio.edu",  codigo: "EST-2025-001" },
-                  { id: 2, nombres: "María", apellidos: "Gómez Quispe",   nivel: "primaria", curso: "3ro Primaria", paralelo: "B", activo: true, correo: "maria@colegio.edu", codigo: "EST-2025-002" },
-                  { id: 3, nombres: "Luis",  apellidos: "Rojas",           nivel: "secundaria", curso: "1ro Secundaria", paralelo: "A", activo: true, correo: "luis@colegio.edu",  codigo: "EST-2025-003" },
-                ];
-                const seeded = ensureCredentialsAndMigrate(seed);
-                save(seeded);
-                DEBUG && console.log("✔ seeded:", seeded);
-                DEBUG && console.groupEnd();
-              }}
-            >
-              <RefreshCw className="h-4 w-4 mr-2" /> Reset
-            </Button>
           </div>
+        </CardContent>
+      </Card>
 
-          {sinSeccionesReales && (
-            <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-              <AlertTriangle className="h-4 w-4" />
-              Sugerencia: crea secciones reales en <strong className="mx-1">Admin → Secciones</strong> para que los
-              <em className="mx-1">cursos/paralelos</em> se basen en la gestión {year}.
+      {/* Tabla */}
+      <Card>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+              <span className="ml-2 text-muted-foreground">Cargando estudiantes...</span>
             </div>
-          )}
-
-          <div className="rounded-md border">
+          ) : students.length === 0 ? (
+            <div className="text-center py-12">
+              <Users className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium">No hay estudiantes</h3>
+              <p className="text-muted-foreground">Agrega estudiantes o ajusta los filtros</p>
+            </div>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>RUDE/Código</TableHead>
+                  <TableHead>Código</TableHead>
                   <TableHead>Estudiante</TableHead>
-                  <TableHead>Usuario</TableHead>
-                  <TableHead>Nivel</TableHead>
                   <TableHead>Curso</TableHead>
                   <TableHead>Paralelo</TableHead>
+                  <TableHead>Usuario</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {list.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="font-mono text-xs">{r.codigo}</TableCell>
+                {students.map((student) => (
+                  <TableRow key={student.id}>
+                    <TableCell className="font-mono text-sm">{student.codigo}</TableCell>
                     <TableCell>
-                      {r.apellidos}, {r.nombres}
-                      <div className="text-xs text-muted-foreground">{r.correo}</div>
+                      <div>
+                        <div className="font-medium">{student.apellidos}</div>
+                        <div className="text-sm text-muted-foreground">{student.nombres}</div>
+                      </div>
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{r.usuario}</TableCell>
-                    <TableCell className="capitalize">{r.nivel}</TableCell>
-                    <TableCell>{r.curso}</TableCell>
-                    <TableCell>{r.paralelo}</TableCell>
+                    <TableCell>{student.curso}</TableCell>
                     <TableCell>
-                      <span className={`text-xs px-2 py-1 rounded ${r.activo ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                        {r.activo ? "Activo" : "Inactivo"}
-                      </span>
+                      <Badge variant="outline">{student.paralelo}</Badge>
                     </TableCell>
-                    <TableCell className="text-right space-x-1 whitespace-nowrap">
-                      <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => showCreds(r.id)}>
-                        <Clipboard className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="secondary" onClick={() => resetPass(r.id)}>
-                        <KeyRound className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => toggleActivo(r.id)}>
-                        {r.activo ? "Desactivar" : "Activar"}
-                      </Button>
-                      <Button size="sm" variant="destructive" onClick={() => remove(r.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                    <TableCell className="font-mono text-sm">{student.usuario || "-"}</TableCell>
+                    <TableCell>
+                      <Badge className={student.activo ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}>
+                        {student.activo ? "Activo" : "Inactivo"}
+                      </Badge>
                     </TableCell>
-                  </TableRow>
-                ))}
-                {list.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center text-muted-foreground">
-                      <div className="flex items-center gap-2 justify-center py-6">
-                        <Info className="h-4 w-4" /> Sin resultados…
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => showCredentials(student)} title="Ver credenciales">
+                          <KeyRound className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => openEdit(student)} title="Editar">
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="ghost" 
+                          className="text-red-600" 
+                          onClick={() => { setSelectedStudent(student); setIsDeleteDialogOpen(true); }}
+                          title="Eliminar"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                )}
+                ))}
               </TableBody>
             </Table>
-          </div>
+          )}
+
+          {/* Paginación */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t">
+              <p className="text-sm text-muted-foreground">
+                Página {currentPage} de {totalPages} ({total} estudiantes)
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Diálogo Crear/Editar */}
-      <CrudFormDialog
-        open={open}
-        onOpenChange={setOpen}
-        title={editing ? "Editar Estudiante" : "Nuevo Estudiante"}
-        description={editing ? "Actualiza los datos del estudiante." : "Al crear, se generarán usuario y contraseña temporal."}
-        fields={dialogFields as any}
-        initialValues={editing ?? {
-          nombres: "",
-          apellidos: "",
-          correo: "",
-          fechaNac: "",
-          sexo: undefined,
-          nivel,                       // nivel del filtro (bloqueado en el diálogo)
-          curso: cursosDispon[0] || "",
-          paralelo: paralelosDispon[0] || "",
-          anioIngreso: year,           // usa la gestión viva
-          activo: true
-        }}
-        onSubmit={onSubmit}
-        submitLabel={editing ? "Actualizar" : "Crear"}
-      />
+      {/* Modal Crear/Editar */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedStudent ? "Editar Estudiante" : "Nuevo Estudiante"}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedStudent 
+                ? "Modifica los datos del estudiante" 
+                : "El sistema generará automáticamente el código, usuario y contraseña temporal"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Nombres *</Label>
+              <Input
+                value={formData.nombres}
+                onChange={(e) => setFormData({ ...formData, nombres: e.target.value.toUpperCase() })}
+                placeholder="JUAN CARLOS"
+                className={formErrors.nombres ? "border-red-500" : ""}
+              />
+              {formErrors.nombres && <p className="text-xs text-red-500">{formErrors.nombres}</p>}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Apellidos *</Label>
+              <Input
+                value={formData.apellidos}
+                onChange={(e) => setFormData({ ...formData, apellidos: e.target.value.toUpperCase() })}
+                placeholder="PÉREZ GARCÍA"
+                className={formErrors.apellidos ? "border-red-500" : ""}
+              />
+              {formErrors.apellidos && <p className="text-xs text-red-500">{formErrors.apellidos}</p>}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Curso *</Label>
+              <Select 
+                value={formData.curso} 
+                onValueChange={(v) => setFormData({ ...formData, curso: v })}
+              >
+                <SelectTrigger className={formErrors.curso ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Seleccionar curso" />
+                </SelectTrigger>
+                <SelectContent>
+                  {cursosDisponibles.map(c => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Paralelo *</Label>
+              <Select 
+                value={formData.paralelo} 
+                onValueChange={(v) => setFormData({ ...formData, paralelo: v })}
+              >
+                <SelectTrigger className={formErrors.paralelo ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Seleccionar paralelo" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(paralelosDisponibles.length ? paralelosDisponibles : ["A", "B", "C"]).map(p => (
+                    <SelectItem key={p} value={p}>{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input
+                type="email"
+                value={formData.email}
+                onChange={(e) => {
+                  setFormData({ ...formData, email: e.target.value });
+                  if (formErrors.email) setFormErrors((current) => ({ ...current, email: "" }));
+                }}
+                placeholder="estudiante@colegio.edu.bo"
+                className={formErrors.email ? "border-red-500" : ""}
+              />
+              {formErrors.email && <p className="text-xs text-red-500">{formErrors.email}</p>}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Fecha de Nacimiento</Label>
+              <Input
+                type="date"
+                value={formData.fecha_nac}
+                onChange={(e) => setFormData({ ...formData, fecha_nac: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Sexo</Label>
+              <Select 
+                value={formData.sexo || "__none__"} 
+                onValueChange={(v) => setFormData({ ...formData, sexo: v === "__none__" ? undefined : v as 'M' | 'F' })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin especificar</SelectItem>
+                  <SelectItem value="M">Masculino</SelectItem>
+                  <SelectItem value="F">Femenino</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Año de Ingreso *</Label>
+              <Input
+                value={formData.anio_ingreso}
+                onChange={(e) => setFormData({ ...formData, anio_ingreso: e.target.value })}
+                placeholder="2025"
+                maxLength={4}
+                className={formErrors.anio_ingreso ? "border-red-500" : ""}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Mes de Ingreso *</Label>
+              <Select 
+                value={formData.mes_ingreso} 
+                onValueChange={(v) => setFormData({ ...formData, mes_ingreso: v })}
+              >
+                <SelectTrigger className={formErrors.mes_ingreso ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Mes" />
+                </SelectTrigger>
+                <SelectContent>
+                  {["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"].map(m => (
+                    <SelectItem key={m} value={m}>
+                      {new Date(2000, parseInt(m) - 1).toLocaleString('es', { month: 'long' })}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedStudent && (
+              <div className="space-y-2">
+                <Label>Estado</Label>
+                <Select 
+                  value={formData.activo ? "true" : "false"} 
+                  onValueChange={(v) => setFormData({ ...formData, activo: v === "true" })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">Activo</SelectItem>
+                    <SelectItem value="false">Inactivo</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {selectedStudent ? "Actualizar" : "Crear Estudiante"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Eliminar */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar estudiante?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. Se eliminará permanentemente a{" "}
+              <strong>{selectedStudent?.nombres} {selectedStudent?.apellidos}</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal Credenciales */}
+      <Dialog open={isCredentialsDialogOpen} onOpenChange={setIsCredentialsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-blue-600" />
+              Credenciales del Estudiante
+            </DialogTitle>
+            <DialogDescription>
+              Guarda estas credenciales. La contraseña temporal deberá ser cambiada en el primer inicio de sesión.
+            </DialogDescription>
+          </DialogHeader>
+
+          {newCredentials && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Usuario:</span>
+                  <span className="font-mono font-bold">{newCredentials.usuario}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Contraseña temporal:</span>
+                  <span className="font-mono font-bold">{newCredentials.password}</span>
+                </div>
+              </div>
+
+              <Button onClick={copyCredentials} className="w-full">
+                <Copy className="h-4 w-4 mr-2" />
+                Copiar Credenciales
+              </Button>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCredentialsDialogOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-// ---------- migración + credenciales ----------
-function ensureCredentialsAndMigrate(items: Partial<Estudiante | any>[]): Estudiante[] {
-  const result: Estudiante[] = [];
-  const existingUsers: string[] = [];
-  for (const raw of items) {
-    const id = Number(raw.id ?? (result.length ? Math.max(...result.map(r => r.id)) + 1 : 1));
-    const anio = (raw.anioIngreso && String(raw.anioIngreso)) || (raw.codigo ? yearFromCodigo(raw.codigo) : String(new Date().getFullYear()));
-    const codigo = raw.codigo ?? `EST-${anio}-${String(id).padStart(3, "0")}`;
-
-    // Migración: si vienen "grado"/"seccion", mapear a "curso"/"paralelo"
-    let nivel: NivelKey = (raw.nivel as NivelKey) || "primaria";
-    let curso = String(
-      raw.curso ??
-      raw.grado ??
-      (nivel === "inicial" ? "1ro Inicial" : nivel === "primaria" ? "1ro Primaria" : "1ro Secundaria")
-    );
-    let paralelo = String(raw.paralelo ?? raw.seccion ?? "A");
-
-    // Normalizar a catálogos conocidos (fallback)
-    const catalogoCursos = cursosPorNivel[nivel];
-    if (!catalogoCursos.includes(curso)) {
-      const m = String(curso).match(/^(\d+)/);
-      if (m) {
-        const n = Number(m[1]);
-        if (nivel === "primaria" && n >= 1 && n <= 6) curso = `${n}ro Primaria`.replace("2ro","2do").replace("4ro","4to").replace("5ro","5to").replace("6ro","6to");
-        if (nivel === "secundaria" && n >= 1 && n <= 6) curso = `${n}ro Secundaria`.replace("2ro","2do").replace("4ro","4to").replace("5ro","5to").replace("6ro","6to");
-        if (nivel === "inicial" && (n === 1 || n === 2)) curso = `${n}ro Inicial`;
-      }
-      if (!catalogoCursos.includes(curso)) curso = catalogoCursos[0];
-    }
-
-    // usuario
-    let usuario = raw.usuario;
-    if (!usuario) {
-      const u = buildUsername(String(raw.apellidos || ""), String(raw.nombres || ""), existingUsers);
-      usuario = u || `user${id}`;
-    }
-    if (existingUsers.includes(usuario)) {
-      let i = 2, cand = `${usuario}.${i}`;
-      while (existingUsers.includes(cand)) { i++; cand = `${usuario}.${i}`; }
-      usuario = cand;
-    }
-    existingUsers.push(usuario);
-
-    const pass = raw.passwordTemp ?? `${anio}${pad6(id)}`;
-
-    result.push({
-      id,
-      nombres: String(raw.nombres || "Nombre"),
-      apellidos: String(raw.apellidos || "Apellido"),
-      nivel,
-      curso,
-      paralelo,
-      activo: raw.activo ?? true,
-      correo: String(raw.correo || `user${id}@colegio.edu`),
-      codigo,
-      usuario,
-      passwordTemp: pass,
-      anioIngreso: anio,
-      fechaNac: raw.fechaNac,
-      sexo: raw.sexo,
-    });
-  }
-  DEBUG && console.log("[DATA] ensureCredentialsAndMigrate result:", result.length);
-  return result;
+// Exportar con ErrorBoundary
+export default function AdminEstudiantes() {
+  return (
+    <ErrorBoundary>
+      <EstudiantesContent />
+    </ErrorBoundary>
+  );
 }

@@ -1,5 +1,9 @@
 // src/pages/teacher/Tareas.tsx
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { getMyTeacherSections, getMyTeacherSectionStudents } from '@/services/teachersApi';
+import { getTeacherCreatedTasks, type TeacherCreatedTask } from '@/services/teacherTasksStore';
+import { getTaskSubmission, listTaskSubmissions, TASK_SUBMISSIONS_UPDATED, type TaskAttachment, type TaskAttachmentKind } from '@/services/taskSubmissionsStore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,7 +26,7 @@ import {
   ClipboardList, BookOpen, User, Plus, Search, Filter, Calendar,
   SquarePen, Eye, ArrowRight, CheckCircle, AlertCircle, Hourglass,
   Users, Download, Upload, FileText, Clock, CheckSquare, XCircle,
-  Send, Star, CalendarDays, Bookmark
+  Send, Star, CalendarDays, Bookmark, ExternalLink
 } from 'lucide-react';
 
 // --- Tipos de Datos ---
@@ -37,22 +41,14 @@ interface Alumno {
 
 interface MateriaDocente {
   id: number;
+  sectionId: number;
   nombre: string;
   grado: string;
   grupo: string;
   docenteId: number;
 }
 
-interface TareaDetalle {
-  id: number;
-  materiaId: number;
-  titulo: string;
-  descripcion: string;
-  fechaAsignacion: string;
-  fechaEntrega: string;
-  ponderacion: number;
-  tipo: 'tarea' | 'examen' | 'proyecto';
-  estado?: 'abierta' | 'cerrada';
+interface TareaDetalle extends TeacherCreatedTask {
   instrucciones?: string;
   archivosAdjuntos?: string[];
 }
@@ -66,6 +62,10 @@ interface EntregaTarea {
   calificacion?: number;
   comentarios?: string;
   archivos?: string[];
+  submissionId?: string;
+  attachmentKind?: TaskAttachmentKind;
+  attachmentUrl?: string;
+  attachments?: TaskAttachment[];
   estado: 'entregado' | 'pendiente' | 'atrasado' | 'calificado';
   retroalimentacion?: string;
 }
@@ -76,7 +76,15 @@ interface EntregaDetalle extends EntregaTarea {
 }
 
 export default function TeacherTareas() {
-  const [selectedMateriaGrupo, setSelectedMateriaGrupo] = useState<string>('1-A');
+  const { user } = useAuth();
+  const teacherId = String(user?.teacherId ?? user?.id ?? 'teacher');
+  const nivel = String(localStorage.getItem('nivel') || '').toLowerCase();
+  const year = String(new Date().getFullYear());
+  const [selectedMateriaGrupo, setSelectedMateriaGrupo] = useState<string>('');
+  const [materiasDocente, setMateriasDocente] = useState<MateriaDocente[]>([]);
+  const [alumnos, setAlumnos] = useState<Alumno[]>([]);
+  const [tareas, setTareas] = useState<TareaDetalle[]>(() => getTeacherCreatedTasks(teacherId));
+  const [cargaError, setCargaError] = useState<string | null>(null);
   const [filtroEstadoTarea, setFiltroEstadoTarea] = useState<string>('todos');
   const [busquedaTarea, setBusquedaTarea] = useState<string>('');
   const [tareaSeleccionada, setTareaSeleccionada] = useState<TareaDetalle | null>(null);
@@ -85,84 +93,112 @@ export default function TeacherTareas() {
   const [comentariosEditando, setComentariosEditando] = useState<{ [key: number]: string }>({});
   const [filtroEstadoEntrega, setFiltroEstadoEntrega] = useState<string>('todos');
 
-  // --- Datos de Ejemplo ---
-  const alumnos: Alumno[] = useMemo(() => [
-    { id: 101, nombre: 'Ana', apellido: 'Gómez', grado: '1', grupo: 'A' },
-    { id: 102, nombre: 'Carlos', apellido: 'Ruiz', grado: '1', grupo: 'A' },
-    { id: 103, nombre: 'Sofía', apellido: 'Martínez', grado: '1', grupo: 'A' },
-    { id: 104, nombre: 'Juan', apellido: 'Pérez', grado: '1', grupo: 'A' },
-    { id: 105, nombre: 'María', apellido: 'López', grado: '1', grupo: 'B' },
-    { id: 106, nombre: 'Pedro', apellido: 'Sánchez', grado: '1', grupo: 'B' },
-  ], []);
+  const [entregas, setEntregas] = useState<EntregaTarea[]>([]);
 
-  const materiasDocente: MateriaDocente[] = useMemo(() => [
-    { id: 1, nombre: 'Matemáticas', grado: '1', grupo: 'A', docenteId: 1 },
-    { id: 2, nombre: 'Física', grado: '1', grupo: 'A', docenteId: 1 },
-    { id: 3, nombre: 'Matemáticas', grado: '1', grupo: 'B', docenteId: 1 },
-    { id: 4, nombre: 'Introducción a la Programación', grado: '2', grupo: 'C', docenteId: 1 },
-  ], []);
+  useEffect(() => {
+    const refreshSubmissions = async () => {
+      try {
+        const records = await listTaskSubmissions(tareas.map((task) => task.id));
+        setEntregas(records.map((submission) => ({
+          id: submission.studentId,
+          tareaId: submission.taskId,
+          alumnoId: submission.studentId,
+          fechaEntregaReal: submission.submittedAt,
+          estado: 'entregado',
+          archivos: submission.attachments.filter((attachment) => attachment.kind === 'archivo').map((attachment) => attachment.name || 'Archivo'),
+          submissionId: submission.id,
+          attachmentKind: submission.attachments[0]?.kind,
+          attachmentUrl: submission.attachments.find((attachment) => attachment.url)?.url,
+          attachments: submission.attachments,
+        })));
+      } catch (error) {
+        console.error('No se pudieron cargar las entregas de tareas:', error);
+      }
+    };
 
-  const tareas: TareaDetalle[] = useMemo(() => [
-    {
-      id: 1, materiaId: 1, titulo: 'Guía de Álgebra', 
-      descripcion: 'Resolver ejercicios de álgebra lineal del capítulo 3.',
-      fechaAsignacion: '2024-01-10', fechaEntrega: '2024-01-20', 
-      ponderacion: 20, tipo: 'tarea', estado: 'cerrada',
-      instrucciones: 'Resolver todos los ejercicios impares del capítulo 3. Mostrar procedimiento completo.',
-      archivosAdjuntos: ['guia-algebra.pdf', 'ejemplos-solucion.docx']
-    },
-    {
-      id: 2, materiaId: 1, titulo: 'Examen Unidad 1', 
-      descripcion: 'Evaluación de los temas de la primera unidad.',
-      fechaAsignacion: '2024-01-15', fechaEntrega: '2024-01-25', 
-      ponderacion: 40, tipo: 'examen', estado: 'cerrada'
-    },
-    {
-      id: 3, materiaId: 1, titulo: 'Proyecto Final', 
-      descripcion: 'Desarrollar un proyecto aplicando los conceptos de todo el curso.',
-      fechaAsignacion: '2024-02-01', fechaEntrega: '2024-02-15', 
-      ponderacion: 40, tipo: 'proyecto', estado: 'abierta',
-      instrucciones: 'Desarrollar una aplicación que resuelva un problema real usando los conceptos aprendidos.'
-    },
-  ], []);
+    void refreshSubmissions();
+    window.addEventListener(TASK_SUBMISSIONS_UPDATED, refreshSubmissions);
+    const channel = 'BroadcastChannel' in window ? new BroadcastChannel(TASK_SUBMISSIONS_UPDATED) : null;
+    if (channel) channel.onmessage = () => { void refreshSubmissions(); };
+    return () => {
+      window.removeEventListener(TASK_SUBMISSIONS_UPDATED, refreshSubmissions);
+      channel?.close();
+    };
+  }, [tareas]);
 
-  const entregas: EntregaTarea[] = useMemo(() => [
-    { id: 1, tareaId: 1, alumnoId: 101, fechaEntregaReal: '2024-01-19', 
-      calificacion: 85, estado: 'calificado', comentarios: 'Excelente trabajo, procedimiento claro.',
-      archivos: ['ana-gomez-algebra.pdf'], retroalimentacion: 'Muy buen desarrollo en los ejercicios 3 y 5.' },
-    { id: 2, tareaId: 1, alumnoId: 102, fechaEntregaReal: '2024-01-20', 
-      calificacion: 70, estado: 'calificado', comentarios: 'Bien, pero falta desarrollar algunos pasos.',
-      archivos: ['carlos-ruiz-algebra.docx'] },
-    { id: 3, tareaId: 1, alumnoId: 103, estado: 'pendiente' },
-    { id: 4, tareaId: 1, alumnoId: 104, fechaEntregaReal: '2024-01-18', 
-      calificacion: 92, estado: 'calificado', comentarios: 'Excelente, muy detallado.',
-      archivos: ['juan-perez-algebra.zip'], retroalimentacion: 'Perfecto en todos los ejercicios.' },
+  useEffect(() => {
+    const refreshTasks = () => setTareas(getTeacherCreatedTasks(teacherId));
+    const onStorage = () => refreshTasks();
+    window.addEventListener('teacher-tasks-updated', refreshTasks);
+    window.addEventListener('storage', onStorage);
+    refreshTasks();
+    return () => {
+      window.removeEventListener('teacher-tasks-updated', refreshTasks);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [teacherId]);
 
-    { id: 5, tareaId: 2, alumnoId: 101, fechaEntregaReal: '2024-01-24', 
-      calificacion: 90, estado: 'calificado', archivos: ['ana-gomez-examen.pdf'] },
-    { id: 6, tareaId: 2, alumnoId: 102, fechaEntregaReal: '2024-01-25', 
-      calificacion: 75, estado: 'calificado', archivos: ['carlos-ruiz-examen.docx'] },
-    { id: 7, tareaId: 2, alumnoId: 103, fechaEntregaReal: '2024-01-26', 
-      calificacion: 60, estado: 'atrasado', comentarios: 'Entregado fuera de plazo.',
-      archivos: ['sofia-martinez-examen.pdf'] },
-    { id: 8, tareaId: 2, alumnoId: 104, fechaEntregaReal: '2024-01-24', 
-      calificacion: 88, estado: 'calificado', archivos: ['juan-perez-examen.zip'] },
+  useEffect(() => {
+    let cancelled = false;
+    if (!nivel) {
+      setMateriasDocente([]);
+      setCargaError('Selecciona un nivel desde el panel docente para ver tus tareas.');
+      return;
+    }
+    getMyTeacherSections(year, nivel)
+      .then((response) => {
+        if (cancelled) return;
+        const subjects = (response.data || []).flatMap((section) => section.assignments.map((assignment) => ({
+          id: assignment.id,
+          sectionId: section.id,
+          nombre: assignment.subject?.nombre || 'Materia',
+          grado: String(section.curso),
+          grupo: section.paralelo,
+          docenteId: Number(teacherId) || 0,
+        })));
+        setMateriasDocente(subjects);
+        setCargaError(null);
+      })
+      .catch((error: any) => {
+        if (!cancelled) setCargaError(error.response?.data?.message || 'No se pudieron cargar tus materias asignadas.');
+      });
+    return () => { cancelled = true; };
+  }, [nivel, year, teacherId]);
 
-    { id: 9, tareaId: 3, alumnoId: 101, estado: 'pendiente' },
-    { id: 10, tareaId: 3, alumnoId: 102, estado: 'pendiente' },
-    { id: 11, tareaId: 3, alumnoId: 103, estado: 'pendiente' },
-    { id: 12, tareaId: 3, alumnoId: 104, estado: 'pendiente' },
-  ], []);
+  useEffect(() => {
+    if (!selectedMateriaGrupo) return;
+    const selected = materiasDocente.find((materia) => String(materia.id) === selectedMateriaGrupo);
+    if (!selected) return;
+    let cancelled = false;
+    getMyTeacherSectionStudents(selected.sectionId)
+      .then((students) => {
+        if (!cancelled) setAlumnos(students.map((student) => ({
+          id: student.id,
+          nombre: student.nombres,
+          apellido: student.apellidos,
+          grado: selected.grado,
+          grupo: selected.grupo,
+        })));
+      })
+      .catch(() => { if (!cancelled) setAlumnos([]); });
+    return () => { cancelled = true; };
+  }, [selectedMateriaGrupo, materiasDocente]);
+
+  useEffect(() => {
+    if (materiasDocente.length && !materiasDocente.some((materia) => String(materia.id) === selectedMateriaGrupo)) {
+      const materiaConTareas = materiasDocente.find((materia) => tareas.some((tarea) => tarea.materiaId === materia.id));
+      setSelectedMateriaGrupo(String((materiaConTareas || materiasDocente[0]).id));
+    }
+  }, [selectedMateriaGrupo, materiasDocente, tareas]);
 
   // --- Lógica de filtrado ---
   const currentMateria = useMemo(() => {
-    const [grado, grupo] = selectedMateriaGrupo.split('-');
-    return materiasDocente.find(m => m.grado === grado && m.grupo === grupo);
+    return materiasDocente.find(m => String(m.id) === selectedMateriaGrupo);
   }, [selectedMateriaGrupo, materiasDocente]);
 
   const alumnosInCurrentGroup = useMemo(() => {
     if (!currentMateria) return [];
-    return alumnos.filter(a => a.grado === currentMateria.grado && a.grupo === currentMateria.grupo);
+    return alumnos;
   }, [alumnos, currentMateria]);
 
   const tareasForCurrentMateria = useMemo(() => {
@@ -297,6 +333,29 @@ export default function TeacherTareas() {
     // En una aplicación real, aquí harías una llamada a la API para generar un ZIP
   };
 
+  const abrirAdjuntoEntrega = async (entrega: EntregaTarea, attachment: TaskAttachment) => {
+    if (attachment.url) {
+      window.open(attachment.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (!entrega.submissionId) return;
+    try {
+      const submission = await getTaskSubmission(entrega.submissionId);
+      const file = submission?.attachments.find((item) => item.id === attachment.id)?.file;
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = attachment.name || 'entrega-estudiante';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      console.error('No se pudo abrir el archivo entregado:', error);
+    }
+  };
+
   // --- Funciones auxiliares ---
   const formatFecha = (fechaStr: string) => {
     if (!fechaStr) return 'N/A';
@@ -306,6 +365,14 @@ export default function TeacherTareas() {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric'
+    });
+  };
+
+  const formatFechaHora = (fechaStr: string) => {
+    const date = new Date(fechaStr);
+    if (!Number.isFinite(date.getTime())) return 'N/A';
+    return date.toLocaleString('es-BO', {
+      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
     });
   };
 
@@ -364,7 +431,7 @@ export default function TeacherTareas() {
               </SelectTrigger>
               <SelectContent>
                 {materiasDocente.map(materia => (
-                  <SelectItem key={`${materia.id}-${materia.grupo}`} value={`${materia.grado}-${materia.grupo}`}>
+                  <SelectItem key={materia.id} value={String(materia.id)}>
                     {materia.nombre} ({materia.grado}° {materia.grupo})
                   </SelectItem>
                 ))}
@@ -494,8 +561,8 @@ export default function TeacherTareas() {
       ) : (
         <Card className="text-center py-12 text-muted-foreground">
           <BookOpen className="h-16 w-16 mx-auto mb-4 text-academic-blue-500" />
-          <p className="text-lg font-medium">Selecciona una materia y grupo para gestionar sus tareas.</p>
-          <p className="mt-2 text-sm">Usa el selector de arriba para comenzar.</p>
+          <p className="text-lg font-medium">{cargaError || (materiasDocente.length ? 'Selecciona una materia para gestionar sus tareas.' : `No tienes materias asignadas para ${nivel || 'este nivel'} en ${year}.`)}</p>
+          <p className="mt-2 text-sm">{materiasDocente.length ? 'Usa el selector de arriba para comenzar.' : 'Solicita a administración que revise tus asignaciones.'}</p>
         </Card>
       )}
 
@@ -601,7 +668,7 @@ export default function TeacherTareas() {
                               {entrega.fechaEntregaReal && (
                                 <div className="flex items-center gap-1">
                                   <Send className="h-3 w-3 text-muted-foreground" />
-                                  <span>Entregado: {formatFecha(entrega.fechaEntregaReal)}</span>
+                                  <span>Entregado: {formatFechaHora(entrega.fechaEntregaReal)}</span>
                                 </div>
                               )}
                               {entrega.calificacion !== undefined && (
@@ -615,15 +682,15 @@ export default function TeacherTareas() {
                             </div>
 
                             {/* Archivos Adjuntos */}
-                            {entrega.archivos && entrega.archivos.length > 0 && (
+                            {entrega.attachments && entrega.attachments.length > 0 && (
                               <div className="mt-2">
-                                <p className="text-sm font-medium mb-1">Archivos entregados:</p>
+                                <p className="text-sm font-medium mb-1">Trabajos adjuntos ({entrega.attachments.length}):</p>
                                 <div className="flex flex-wrap gap-2">
-                                  {entrega.archivos.map((archivo, index) => (
-                                    <Badge key={index} variant="outline" className="cursor-pointer hover:bg-muted">
-                                      <FileText className="h-3 w-3 mr-1" />
-                                      {archivo}
-                                    </Badge>
+                                  {entrega.attachments.map((attachment) => (
+                                    <Button key={attachment.id} variant="outline" size="sm" onClick={() => void abrirAdjuntoEntrega(entrega, attachment)}>
+                                      {attachment.url ? <ExternalLink className="h-4 w-4 mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+                                      {attachment.name || (attachment.kind === 'youtube' ? 'Abrir video de YouTube' : attachment.url || 'Abrir archivo')}
+                                    </Button>
                                   ))}
                                 </div>
                               </div>

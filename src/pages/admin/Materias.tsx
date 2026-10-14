@@ -1,4 +1,6 @@
-import { useState, useMemo } from "react";
+// src/pages/admin/Materias.tsx
+// Gestión de Materias - Conectado a localStorage y catálogo Bolivia
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -16,912 +19,589 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Search, Plus, Edit, Trash2, BookOpen, Filter, Info, BookMarked, Users, 
-  CheckCircle, XCircle, GraduationCap, Clock, UserCheck, BookText,
-  Baby, School, Library, Target, Users2, Sparkles, Calendar
+  Search, Plus, Edit, Trash2, BookOpen, RefreshCw, Download,
+  CheckCircle, XCircle, Clock, BookText, School, Library, Sparkles
 } from "lucide-react";
+import { pushAudit } from "@/lib/audit";
 
+// Importar catálogo unificado Bolivia
+import {
+  NIVELES,
+  CURSOS_POR_NIVEL,
+  AREAS_POR_NIVEL,
+  MATERIAS_POR_NIVEL,
+  type NivelKey,
+  type MateriaBase,
+} from "@/lib/catalogo-bolivia";
+
+// ==========================================
+// TIPOS
+// ==========================================
 interface Materia {
   id: number;
+  codigo: string;
   nombre: string;
   descripcion: string;
-  nivelEducativo: 'inicial' | 'primaria' | 'secundaria';
-  grado: string;
-  areaDesarrollo: string;
-  activo: boolean;
+  nivel: NivelKey;
+  curso: string;           // "1ro Primaria", "2do Secundaria", etc.
+  area: string;
   horasSemanales: number;
-  docenteAsignado?: string;
-  enfoque: 'académico' | 'desarrollo' | 'artístico' | 'tecnológico';
+  activo: boolean;
   competencias: string[];
   fechaCreacion: string;
+  fechaModificacion?: string;
 }
 
-export default function AdminMaterias() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterNivel, setFilterNivel] = useState("todos");
-  const [filterGrado, setFilterGrado] = useState("todos");
-  const [filterActivo, setFilterActivo] = useState("todos");
-  const [filterArea, setFilterArea] = useState("todos");
-  const [modalAbierto, setModalAbierto] = useState(false);
-  const [materiaEditando, setMateriaEditando] = useState<Materia | null>(null);
-  const [formData, setFormData] = useState({
-    nombre: "",
-    descripcion: "",
-    nivelEducativo: "inicial" as 'inicial' | 'primaria' | 'secundaria',
-    grado: "3 años",
-    areaDesarrollo: "Desarrollo Personal y Social",
-    horasSemanales: 3,
-    enfoque: "desarrollo" as 'académico' | 'desarrollo' | 'artístico' | 'tecnológico',
-    competencias: [""],
-    activo: true
+const STORAGE_KEY = "adm:materias";
+
+// ==========================================
+// HELPERS
+// ==========================================
+function loadMaterias(): Materia[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMaterias(materias: Materia[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(materias));
+}
+
+// Generar materias iniciales desde el catálogo
+function generarMateriasIniciales(): Materia[] {
+  const materias: Materia[] = [];
+  let id = 1;
+  const fecha = new Date().toISOString().split("T")[0];
+
+  NIVELES.forEach(nivel => {
+    const cursos = CURSOS_POR_NIVEL[nivel];
+    const materiasBase = MATERIAS_POR_NIVEL[nivel];
+
+    cursos.forEach(curso => {
+      materiasBase.forEach(mb => {
+        materias.push({
+          id: id++,
+          codigo: `${mb.codigo}-${curso.replace(/\s+/g, "").slice(0, 3).toUpperCase()}`,
+          nombre: mb.nombre,
+          descripcion: `${mb.nombre} para ${curso}`,
+          nivel,
+          curso,
+          area: mb.area,
+          horasSemanales: mb.horasSemanales,
+          activo: true,
+          competencias: [],
+          fechaCreacion: fecha,
+        });
+      });
+    });
   });
 
-  const materias: Materia[] = useMemo(() => [
-    {
-      id: 1, 
-      nombre: "Exploración Sensorial", 
-      descripcion: "Desarrollo de los sentidos mediante experiencias táctiles, visuales y auditivas. Estimulación temprana.", 
-      nivelEducativo: "inicial", 
-      grado: "3 años", 
-      areaDesarrollo: "Desarrollo Sensorial",
-      horasSemanales: 4, 
-      activo: true, 
-      docenteAsignado: "Prof. María González",
-      enfoque: "desarrollo",
-      competencias: ["Discriminación sensorial", "Coordinación visomotora", "Atención sostenida"],
-      fechaCreacion: "2024-01-15"
-    },
-    {
-      id: 2, 
-      nombre: "Juegos y Psicomotricidad", 
-      descripcion: "Desarrollo de la motricidad gruesa y fina a través del juego dirigido y libre.", 
-      nivelEducativo: "inicial", 
-      grado: "4 años", 
-      areaDesarrollo: "Desarrollo Motor",
-      horasSemanales: 5, 
-      activo: true, 
-      docenteAsignado: "Prof. Carlos López",
-      enfoque: "desarrollo",
-      competencias: ["Coordinación motora", "Equilibrio", "Lateralidad"],
-      fechaCreacion: "2024-01-10"
-    },
-    {
-      id: 3, 
-      nombre: "Lenguaje y Comunicación", 
-      descripcion: "Desarrollo del lenguaje oral, vocabulario y habilidades comunicativas básicas.", 
-      nivelEducativo: "inicial", 
-      grado: "5 años", 
-      areaDesarrollo: "Comunicación Integral",
-      horasSemanales: 4, 
-      activo: true, 
-      docenteAsignado: "Prof. Ana Martínez",
-      enfoque: "desarrollo",
-      competencias: ["Expresión oral", "Comprensión verbal", "Ampliación de vocabulario"],
-      fechaCreacion: "2024-01-12"
-    },
-    {
-      id: 4, 
-      nombre: "Matemáticas Básicas", 
-      descripcion: "Introducción a números, operaciones básicas y resolución de problemas matemáticos simples.", 
-      nivelEducativo: "primaria", 
-      grado: "1°", 
-      areaDesarrollo: "Razonamiento Lógico-Matemático",
-      horasSemanales: 6, 
-      activo: true, 
-      docenteAsignado: "Prof. Roberto Díaz",
-      enfoque: "académico",
-      competencias: ["Cálculo mental", "Resolución de problemas", "Pensamiento lógico"],
-      fechaCreacion: "2024-01-20"
-    },
-    {
-      id: 5, 
-      nombre: "Comunicación Integral", 
-      descripcion: "Desarrollo de lectura, escritura y comprensión lectora. Expresión oral y escrita.", 
-      nivelEducativo: "primaria", 
-      grado: "2°", 
-      areaDesarrollo: "Comunicación Integral",
-      horasSemanales: 6, 
-      activo: true, 
-      docenteAsignado: "Prof. Laura Ramírez",
-      enfoque: "académico",
-      competencias: ["Lectura comprensiva", "Expresión escrita", "Ortografía"],
-      fechaCreacion: "2024-01-18"
-    },
-    {
-      id: 6, 
-      nombre: "Ciencias y Ambiente", 
-      descripcion: "Exploración del entorno natural, seres vivos y fenómenos naturales. Experimentación básica.", 
-      nivelEducativo: "primaria", 
-      grado: "3°", 
-      areaDesarrollo: "Ciencia y Tecnología",
-      horasSemanales: 4, 
-      activo: true, 
-      docenteAsignado: "Prof. Miguel Torres",
-      enfoque: "académico",
-      competencias: ["Observación científica", "Método experimental", "Cuidado del ambiente"],
-      fechaCreacion: "2024-01-22"
-    },
-    {
-      id: 7, 
-      nombre: "Arte y Creatividad", 
-      descripcion: "Expresión artística mediante dibujo, pintura, música y manualidades. Desarrollo de la creatividad.", 
-      nivelEducativo: "primaria", 
-      grado: "4°", 
-      areaDesarrollo: "Arte y Cultura",
-      horasSemanales: 3, 
-      activo: true, 
-      docenteAsignado: "Prof. Elena Castro",
-      enfoque: "artístico",
-      competencias: ["Expresión artística", "Creatividad", "Apreciación estética"],
-      fechaCreacion: "2024-01-25"
-    },
-    {
-      id: 8, 
-      nombre: "Álgebra y Geometría", 
-      descripcion: "Estudio de ecuaciones, funciones y figuras geométricas. Aplicación en problemas reales.", 
-      nivelEducativo: "secundaria", 
-      grado: "1°", 
-      areaDesarrollo: "Matemática Avanzada",
-      horasSemanales: 5, 
-      activo: true, 
-      docenteAsignado: "Prof. David Chen",
-      enfoque: "académico",
-      competencias: ["Pensamiento abstracto", "Resolución algebraica", "Razonamiento geométrico"],
-      fechaCreacion: "2024-01-30"
-    },
-    {
-      id: 9, 
-      nombre: "Física General", 
-      descripcion: "Fundamentos de mecánica, termodinámica y electricidad. Experimentos de laboratorio.", 
-      nivelEducativo: "secundaria", 
-      grado: "2°", 
-      areaDesarrollo: "Ciencias Exactas",
-      horasSemanales: 4, 
-      activo: true, 
-      docenteAsignado: "Prof. Sofia Rodríguez",
-      enfoque: "académico",
-      competencias: ["Análisis físico", "Método científico", "Aplicación matemática"],
-      fechaCreacion: "2024-02-01"
-    },
-    {
-      id: 10, 
-      nombre: "Programación y Robótica", 
-      descripcion: "Introducción a la programación con Scratch y Python. Fundamentos de robótica educativa.", 
-      nivelEducativo: "secundaria", 
-      grado: "3°", 
-      areaDesarrollo: "Tecnología e Innovación",
-      horasSemanales: 4, 
-      activo: true, 
-      docenteAsignado: "Prof. Andrea López",
-      enfoque: "tecnológico",
-      competencias: ["Pensamiento computacional", "Programación básica", "Resolución algorítmica"],
-      fechaCreacion: "2024-02-05"
-    },
-    {
-      id: 11, 
-      nombre: "Emprendimiento", 
-      descripcion: "Desarrollo de ideas de negocio, marketing básico y habilidades emprendedoras.", 
-      nivelEducativo: "secundaria", 
-      grado: "4°", 
-      areaDesarrollo: "Desarrollo Empresarial",
-      horasSemanales: 3, 
-      activo: true, 
-      docenteAsignado: "Prof. Jorge Mendoza",
-      enfoque: "desarrollo",
-      competencias: ["Pensamiento emprendedor", "Planificación", "Trabajo en equipo"],
-      fechaCreacion: "2024-02-08"
-    },
-    {
-      id: 12, 
-      nombre: "Orientación Vocacional", 
-      descripcion: "Exploración de intereses profesionales y desarrollo de proyecto de vida.", 
-      nivelEducativo: "secundaria", 
-      grado: "5°", 
-      areaDesarrollo: "Desarrollo Personal",
-      horasSemanales: 2, 
-      activo: true, 
-      docenteAsignado: "Prof. Carmen Ruiz",
-      enfoque: "desarrollo",
-      competencias: ["Autoconocimiento", "Toma de decisiones", "Proyecto de vida"],
-      fechaCreacion: "2024-02-10"
-    },
-  ], []);
+  return materias;
+}
 
-  const opcionesGrado = {
-    inicial: ["3 años", "4 años", "5 años"],
-    primaria: ["1°", "2°", "3°", "4°", "5°", "6°"],
-    secundaria: ["1°", "2°", "3°", "4°", "5°"]
-  };
+// Colores por nivel
+const nivelColor: Record<NivelKey, string> = {
+  inicial: "bg-pink-100 text-pink-700 border-pink-200",
+  primaria: "bg-blue-100 text-blue-700 border-blue-200",
+  secundaria: "bg-purple-100 text-purple-700 border-purple-200",
+};
 
-  const areasDesarrollo = {
-    inicial: [
-      "Desarrollo Personal y Social",
-      "Desarrollo Sensorial", 
-      "Desarrollo Motor",
-      "Comunicación Integral",
-      "Exploración del Medio"
-    ],
-    primaria: [
-      "Comunicación Integral",
-      "Razonamiento Lógico-Matemático",
-      "Ciencia y Tecnología",
-      "Arte y Cultura",
-      "Educación Física",
-      "Formación Ciudadana"
-    ],
-    secundaria: [
-      "Matemática Avanzada",
-      "Ciencias Exactas",
-      "Ciencias Sociales",
-      "Lengua y Literatura",
-      "Tecnología e Innovación",
-      "Desarrollo Personal",
-      "Desarrollo Empresarial",
-      "Arte y Expresión"
-    ]
-  };
+// ==========================================
+// COMPONENTE PRINCIPAL
+// ==========================================
+export default function AdminMaterias() {
+  const year = localStorage.getItem("adm:year") || String(new Date().getFullYear());
+  const nivelGlobal = (localStorage.getItem("adm:nivel") as NivelKey) || "primaria";
 
-  const uniqueNiveles = useMemo(() => ["inicial", "primaria", "secundaria"], []);
-  const uniqueAreas = useMemo(
-    () => Array.from(new Set(materias.map((m) => m.areaDesarrollo))).sort(),
-    [materias]
-  );
+  // Estado
+  const [materias, setMaterias] = useState<Materia[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterNivel, setFilterNivel] = useState<NivelKey | "todos">(nivelGlobal);
+  const [filterCurso, setFilterCurso] = useState<string>("todos");
+  const [filterArea, setFilterArea] = useState<string>("todos");
+  const [filterActivo, setFilterActivo] = useState<"todos" | "activo" | "inactivo">("todos");
 
-  const filteredMaterias = useMemo(() => {
-    return materias.filter((m) => {
-      const matchesSearch = `${m.nombre} ${m.descripcion} ${m.areaDesarrollo} ${m.competencias.join(' ')}`.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesNivel = filterNivel === "todos" || m.nivelEducativo === filterNivel;
-      const matchesGrado = filterGrado === "todos" || m.grado === filterGrado;
-      const matchesActivo =
-        filterActivo === "todos" ||
-        (filterActivo === "activo" && m.activo) ||
-        (filterActivo === "inactivo" && !m.activo);
-      const matchesArea = filterArea === "todos" || m.areaDesarrollo === filterArea;
-      
-      return matchesSearch && matchesNivel && matchesGrado && matchesActivo && matchesArea;
-    });
-  }, [materias, searchTerm, filterNivel, filterGrado, filterActivo, filterArea]);
+  // Modal
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Materia | null>(null);
 
-  const stats = useMemo(() => {
-    const total = materias.length;
-    const activas = materias.filter((m) => m.activo).length;
-    const inactivas = total - activas;
-    const horasTotales = materias.reduce((sum, m) => sum + m.horasSemanales, 0);
-    
-    const porNivel = {
-      inicial: materias.filter(m => m.nivelEducativo === 'inicial').length,
-      primaria: materias.filter(m => m.nivelEducativo === 'primaria').length,
-      secundaria: materias.filter(m => m.nivelEducativo === 'secundaria').length
-    };
-    
-    return { total, activas, inactivas, horasTotales, porNivel };
+  // Form
+  const [form, setForm] = useState({
+    codigo: "",
+    nombre: "",
+    descripcion: "",
+    nivel: nivelGlobal as NivelKey,
+    curso: CURSOS_POR_NIVEL[nivelGlobal][0],
+    area: AREAS_POR_NIVEL[nivelGlobal][0],
+    horasSemanales: 4,
+    activo: true,
+    competencias: [""],
+  });
+
+  // Cargar datos al montar
+  useEffect(() => {
+    let data = loadMaterias();
+    if (data.length === 0) {
+      // Generar datos iniciales desde catálogo Bolivia
+      data = generarMateriasIniciales();
+      saveMaterias(data);
+      console.log("[Materias] Generadas materias iniciales:", data.length);
+    }
+    setMaterias(data);
+  }, []);
+
+  // Cursos disponibles según nivel seleccionado
+  const cursosDisponibles = useMemo(() => {
+    if (filterNivel === "todos") {
+      return [...CURSOS_POR_NIVEL.inicial, ...CURSOS_POR_NIVEL.primaria, ...CURSOS_POR_NIVEL.secundaria];
+    }
+    return [...CURSOS_POR_NIVEL[filterNivel]];
+  }, [filterNivel]);
+
+  // Áreas disponibles según nivel del form
+  const areasForm = useMemo(() => {
+    return [...AREAS_POR_NIVEL[form.nivel]];
+  }, [form.nivel]);
+
+  const cursosForm = useMemo(() => {
+    return [...CURSOS_POR_NIVEL[form.nivel]];
+  }, [form.nivel]);
+
+  // Áreas únicas de materias existentes
+  const areasUnicas = useMemo(() => {
+    return Array.from(new Set(materias.map(m => m.area))).sort();
   }, [materias]);
 
-  const abrirModalNuevo = () => {
-    setMateriaEditando(null);
-    setFormData({
+  // Filtrar materias
+  const filtered = useMemo(() => {
+    return materias.filter(m => {
+      const matchQ = `${m.codigo} ${m.nombre} ${m.descripcion} ${m.area}`.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchNivel = filterNivel === "todos" || m.nivel === filterNivel;
+      const matchCurso = filterCurso === "todos" || m.curso === filterCurso;
+      const matchArea = filterArea === "todos" || m.area === filterArea;
+      const matchActivo = filterActivo === "todos" || (filterActivo === "activo" ? m.activo : !m.activo);
+      return matchQ && matchNivel && matchCurso && matchArea && matchActivo;
+    });
+  }, [materias, searchTerm, filterNivel, filterCurso, filterArea, filterActivo]);
+
+  // Estadísticas
+  const stats = useMemo(() => {
+    const total = materias.length;
+    const activas = materias.filter(m => m.activo).length;
+    const porNivel = {
+      inicial: materias.filter(m => m.nivel === "inicial").length,
+      primaria: materias.filter(m => m.nivel === "primaria").length,
+      secundaria: materias.filter(m => m.nivel === "secundaria").length,
+    };
+    const horasTotales = materias.filter(m => m.activo).reduce((sum, m) => sum + m.horasSemanales, 0);
+    return { total, activas, inactivas: total - activas, porNivel, horasTotales };
+  }, [materias]);
+
+  // Handlers
+  const save = (next: Materia[]) => {
+    setMaterias(next);
+    saveMaterias(next);
+  };
+
+  const openCreate = () => {
+    setEditing(null);
+    setForm({
+      codigo: "",
       nombre: "",
       descripcion: "",
-      nivelEducativo: "inicial",
-      grado: "3 años",
-      areaDesarrollo: "Desarrollo Personal y Social",
-      horasSemanales: 3,
-      enfoque: "desarrollo",
+      nivel: filterNivel === "todos" ? "primaria" : filterNivel,
+      curso: filterNivel === "todos" ? CURSOS_POR_NIVEL.primaria[0] : CURSOS_POR_NIVEL[filterNivel][0],
+      area: filterNivel === "todos" ? AREAS_POR_NIVEL.primaria[0] : AREAS_POR_NIVEL[filterNivel][0],
+      horasSemanales: 4,
+      activo: true,
       competencias: [""],
-      activo: true
     });
-    setModalAbierto(true);
+    setModalOpen(true);
   };
 
-  const abrirModalEditar = (materia: Materia) => {
-    setMateriaEditando(materia);
-    setFormData({
-      nombre: materia.nombre,
-      descripcion: materia.descripcion,
-      nivelEducativo: materia.nivelEducativo,
-      grado: materia.grado,
-      areaDesarrollo: materia.areaDesarrollo,
-      horasSemanales: materia.horasSemanales,
-      enfoque: materia.enfoque,
-      competencias: materia.competencias.length > 0 ? materia.competencias : [""],
-      activo: materia.activo
+  const openEdit = (m: Materia) => {
+    setEditing(m);
+    setForm({
+      codigo: m.codigo,
+      nombre: m.nombre,
+      descripcion: m.descripcion,
+      nivel: m.nivel,
+      curso: m.curso,
+      area: m.area,
+      horasSemanales: m.horasSemanales,
+      activo: m.activo,
+      competencias: m.competencias.length > 0 ? m.competencias : [""],
     });
-    setModalAbierto(true);
+    setModalOpen(true);
   };
 
-  const handleNivelChange = (nivel: 'inicial' | 'primaria' | 'secundaria') => {
-    setFormData({
-      ...formData,
-      nivelEducativo: nivel,
-      grado: opcionesGrado[nivel][0],
-      areaDesarrollo: areasDesarrollo[nivel][0]
-    });
-  };
-
-  const agregarCompetencia = () => {
-    setFormData({
-      ...formData,
-      competencias: [...formData.competencias, ""]
+  const handleNivelChange = (nivel: NivelKey) => {
+    setForm({
+      ...form,
+      nivel,
+      curso: CURSOS_POR_NIVEL[nivel][0],
+      area: AREAS_POR_NIVEL[nivel][0],
     });
   };
 
-  const actualizarCompetencia = (index: number, valor: string) => {
-    const nuevasCompetencias = [...formData.competencias];
-    nuevasCompetencias[index] = valor;
-    setFormData({
-      ...formData,
-      competencias: nuevasCompetencias
-    });
+  const addCompetencia = () => {
+    setForm({ ...form, competencias: [...form.competencias, ""] });
   };
 
-  const eliminarCompetencia = (index: number) => {
-    const nuevasCompetencias = formData.competencias.filter((_, i) => i !== index);
-    setFormData({
-      ...formData,
-      competencias: nuevasCompetencias.length > 0 ? nuevasCompetencias : [""]
-    });
+  const updateCompetencia = (idx: number, value: string) => {
+    const next = [...form.competencias];
+    next[idx] = value;
+    setForm({ ...form, competencias: next });
   };
 
-  const guardarMateria = () => {
-    if (!formData.nombre.trim() || !formData.descripcion.trim()) {
-      alert("Por favor completa todos los campos requeridos");
+  const removeCompetencia = (idx: number) => {
+    const next = form.competencias.filter((_, i) => i !== idx);
+    setForm({ ...form, competencias: next.length > 0 ? next : [""] });
+  };
+
+  const onSubmit = () => {
+    if (!form.nombre.trim()) {
+      alert("El nombre es requerido");
       return;
     }
 
-    const competenciasValidas = formData.competencias.filter(c => c.trim() !== "");
+    const competenciasValidas = form.competencias.filter(c => c.trim() !== "");
+    const fecha = new Date().toISOString().split("T")[0];
 
-    if (competenciasValidas.length === 0) {
-      alert("Agrega al menos una competencia a desarrollar");
-      return;
-    }
-
-    const datosFinales = {
-      ...formData,
-      competencias: competenciasValidas
-    };
-
-    if (materiaEditando) {
-      console.log("Editando materia:", materiaEditando.id, datosFinales);
-      alert(`Materia "${datosFinales.nombre}" actualizada correctamente`);
+    if (editing) {
+      const updated: Materia = {
+        ...editing,
+        ...form,
+        competencias: competenciasValidas,
+        fechaModificacion: fecha,
+      };
+      const next = materias.map(m => m.id === editing.id ? updated : m);
+      save(next);
+      pushAudit("materia:update", { id: editing.id, nombre: form.nombre });
     } else {
-      console.log("Creando nueva materia:", datosFinales);
-      alert(`Materia "${datosFinales.nombre}" creada correctamente`);
+      const id = materias.length > 0 ? Math.max(...materias.map(m => m.id)) + 1 : 1;
+      const codigo = form.codigo || `MAT-${form.nivel.toUpperCase().slice(0, 3)}-${String(id).padStart(3, "0")}`;
+      const nuevo: Materia = {
+        id,
+        codigo,
+        nombre: form.nombre,
+        descripcion: form.descripcion,
+        nivel: form.nivel,
+        curso: form.curso,
+        area: form.area,
+        horasSemanales: form.horasSemanales,
+        activo: form.activo,
+        competencias: competenciasValidas,
+        fechaCreacion: fecha,
+      };
+      save([nuevo, ...materias]);
+      pushAudit("materia:create", { id, nombre: form.nombre });
     }
-    
-    setModalAbierto(false);
+    setModalOpen(false);
   };
 
-  const handleDeleteMateria = (id: number, nombre: string) => {
-    if (!confirm(`¿Estás seguro de que deseas eliminar la materia "${nombre}"?`)) return;
-    console.log(`Eliminando materia ${id}`);
-    alert(`Materia "${nombre}" eliminada correctamente`);
+  const toggleActivo = (id: number) => {
+    const next = materias.map(m => m.id === id ? { ...m, activo: !m.activo } : m);
+    save(next);
+    pushAudit("materia:toggle", { id });
   };
 
-  const toggleEstadoMateria = (id: number, nombre: string, estadoActual: boolean) => {
-    const accion = estadoActual ? "desactivar" : "activar";
-    if (!confirm(`¿Estás seguro de que deseas ${accion} la materia "${nombre}"?`)) return;
-    console.log(`${accion.toUpperCase()} materia ${id}`);
-    alert(`Materia "${nombre}" ${accion === 'activar' ? 'activada' : 'desactivada'} correctamente`);
+  const remove = (id: number) => {
+    if (!confirm("¿Eliminar esta materia?")) return;
+    const next = materias.filter(m => m.id !== id);
+    save(next);
+    pushAudit("materia:delete", { id });
   };
 
-  const getNivelIcon = (nivel: string) => {
-    switch (nivel) {
-      case 'inicial': return <Baby className="h-4 w-4" />;
-      case 'primaria': return <School className="h-4 w-4" />;
-      case 'secundaria': return <Library className="h-4 w-4" />;
-      default: return <BookOpen className="h-4 w-4" />;
-    }
-  };
-
-  const getNivelBadge = (nivel: string) => {
-    const config = {
-      inicial: { color: "bg-pink-100 text-pink-700", label: "Inicial" },
-      primaria: { color: "bg-blue-100 text-blue-700", label: "Primaria" },
-      secundaria: { color: "bg-green-100 text-green-700", label: "Secundaria" }
-    };
-    const { color, label } = config[nivel as keyof typeof config] || config.inicial;
-    return (
-      <Badge className={`${color} flex items-center gap-1`}>
-        {getNivelIcon(nivel)}
-        {label}
-      </Badge>
-    );
-  };
-
-  const getEnfoqueBadge = (enfoque: string) => {
-    const config = {
-      académico: { color: "bg-purple-100 text-purple-700", icon: "📚" },
-      desarrollo: { color: "bg-orange-100 text-orange-700", icon: "🌟" },
-      artístico: { color: "bg-red-100 text-red-700", icon: "🎨" },
-      tecnológico: { color: "bg-cyan-100 text-cyan-700", icon: "💻" }
-    };
-    const { color, icon } = config[enfoque as keyof typeof config] || config.académico;
-    return <Badge className={color}>{icon} {enfoque.charAt(0).toUpperCase() + enfoque.slice(1)}</Badge>;
-  };
-
-  const getActivoBadgeColors = (activo: boolean) =>
-    activo ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
-
-  const formatFecha = (fechaStr: string) => {
-    const [year, month, day] = fechaStr.split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-    return date.toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+  const regenerar = () => {
+    if (!confirm("¿Regenerar todas las materias desde el catálogo Bolivia?\nEsto eliminará las materias personalizadas.")) return;
+    const data = generarMateriasIniciales();
+    save(data);
+    pushAudit("materia:regenerar", { count: data.length });
   };
 
   return (
     <div className="space-y-6 p-4">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
-            <BookMarked className="h-7 w-7 text-blue-600" />
-            Gestión de Materias por Nivel
-          </h1>
-          <p className="text-muted-foreground">
-            Administra el plan curricular para Inicial, Primaria y Secundaria.
-          </p>
-        </div>
-        <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={abrirModalNuevo}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nueva Materia
-        </Button>
+      <div className="flex items-center gap-2">
+        <BookOpen className="h-6 w-6 text-blue-600" />
+        <h1 className="text-2xl font-bold">Materias — Gestión {year}</h1>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Total Materias</p>
-              <p className="text-2xl font-bold">{stats.total}</p>
-              <div className="flex gap-2 text-xs text-muted-foreground mt-1">
-                <span>I: {stats.porNivel.inicial}</span>
-                <span>P: {stats.porNivel.primaria}</span>
-                <span>S: {stats.porNivel.secundaria}</span>
-              </div>
-            </div>
-            <div className="p-2 bg-blue-100 rounded-full">
-              <BookOpen className="h-5 w-5 text-blue-600" />
-            </div>
+          <CardContent className="pt-4">
+            <div className="text-sm text-muted-foreground">Total</div>
+            <div className="text-2xl font-bold">{stats.total}</div>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Materias Activas</p>
-              <p className="text-2xl font-bold text-green-600">{stats.activas}</p>
-              <p className="text-xs text-muted-foreground">{Math.round((stats.activas/stats.total)*100)}% del total</p>
-            </div>
-            <div className="p-2 bg-green-100 rounded-full">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-            </div>
+          <CardContent className="pt-4">
+            <div className="text-sm text-muted-foreground">Activas</div>
+            <div className="text-2xl font-bold text-green-600">{stats.activas}</div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Horas Semanales</p>
-              <p className="text-2xl font-bold text-orange-600">{stats.horasTotales}h</p>
-              <p className="text-xs text-muted-foreground">Carga horaria total</p>
-            </div>
-            <div className="p-2 bg-orange-100 rounded-full">
-              <Clock className="h-5 w-5 text-orange-600" />
-            </div>
+        <Card className={nivelColor.inicial}>
+          <CardContent className="pt-4">
+            <div className="text-sm">Inicial</div>
+            <div className="text-xl font-bold">{stats.porNivel.inicial}</div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Niveles Educativos</p>
-              <p className="text-2xl font-bold text-purple-600">3</p>
-              <p className="text-xs text-muted-foreground">Inicial, Primaria, Secundaria</p>
-            </div>
-            <div className="p-2 bg-purple-100 rounded-full">
-              <GraduationCap className="h-5 w-5 text-purple-600" />
-            </div>
+        <Card className={nivelColor.primaria}>
+          <CardContent className="pt-4">
+            <div className="text-sm">Primaria</div>
+            <div className="text-xl font-bold">{stats.porNivel.primaria}</div>
+          </CardContent>
+        </Card>
+        <Card className={nivelColor.secundaria}>
+          <CardContent className="pt-4">
+            <div className="text-sm">Secundaria</div>
+            <div className="text-xl font-bold">{stats.porNivel.secundaria}</div>
           </CardContent>
         </Card>
       </div>
 
       {/* Filtros */}
       <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row gap-4 items-center">
-            <div className="relative flex-1 w-full md:w-auto">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input
-                placeholder="Buscar materias, competencias o áreas..."
-                className="pl-10 w-full"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-              <Select value={filterNivel} onValueChange={setFilterNivel}>
-                <SelectTrigger className="w-full sm:w-[150px]">
-                  <GraduationCap className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <SelectValue placeholder="Nivel" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos los niveles</SelectItem>
-                  <SelectItem value="inicial">Inicial</SelectItem>
-                  <SelectItem value="primaria">Primaria</SelectItem>
-                  <SelectItem value="secundaria">Secundaria</SelectItem>
-                </SelectContent>
-              </Select>
+        <CardContent className="p-4 flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="h-4 w-4 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-8 w-[220px]"
+              placeholder="Buscar materia..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+          </div>
 
-              <Select value={filterGrado} onValueChange={setFilterGrado}>
-                <SelectTrigger className="w-full sm:w-[130px]">
-                  <Users className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <SelectValue placeholder="Grado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos</SelectItem>
-                  {Array.from(new Set(materias.map(m => m.grado))).sort().map((grado) => (
-                    <SelectItem key={grado} value={grado}>{grado}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <Select value={filterNivel} onValueChange={v => { setFilterNivel(v as any); setFilterCurso("todos"); }}>
+            <SelectTrigger className="w-[140px]"><SelectValue placeholder="Nivel" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los niveles</SelectItem>
+              {NIVELES.map(n => (
+                <SelectItem key={n} value={n}>{n.charAt(0).toUpperCase() + n.slice(1)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-              <Select value={filterArea} onValueChange={setFilterArea}>
-                <SelectTrigger className="w-full sm:w-[160px]">
-                  <BookText className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <SelectValue placeholder="Área" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todas las áreas</SelectItem>
-                  {uniqueAreas.map((area) => (
-                    <SelectItem key={area} value={area}>{area}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <Select value={filterCurso} onValueChange={setFilterCurso}>
+            <SelectTrigger className="w-[160px]"><SelectValue placeholder="Curso" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los cursos</SelectItem>
+              {cursosDisponibles.map(c => (
+                <SelectItem key={c} value={c}>{c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-              <Select value={filterActivo} onValueChange={setFilterActivo}>
-                <SelectTrigger className="w-full sm:w-[130px]">
-                  <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos</SelectItem>
-                  <SelectItem value="activo">Activas</SelectItem>
-                  <SelectItem value="inactivo">Inactivas</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <Select value={filterArea} onValueChange={setFilterArea}>
+            <SelectTrigger className="w-[200px]"><SelectValue placeholder="Área" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todas las áreas</SelectItem>
+              {areasUnicas.map(a => (
+                <SelectItem key={a} value={a}>{a}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={filterActivo} onValueChange={v => setFilterActivo(v as any)}>
+            <SelectTrigger className="w-[120px]"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos</SelectItem>
+              <SelectItem value="activo">Activas</SelectItem>
+              <SelectItem value="inactivo">Inactivas</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <div className="ml-auto flex gap-2">
+            <Button variant="outline" onClick={regenerar} title="Regenerar desde catálogo Bolivia">
+              <RefreshCw className="h-4 w-4 mr-1" /> Regenerar
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4 mr-1" /> Nueva Materia
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* NUEVO: Grid de Tarjetas */}
+      {/* Tabla */}
       <Card>
         <CardHeader>
-          <CardTitle>Plan Curricular por Nivel Educativo</CardTitle>
-          <CardDescription>
-            Mostrando {filteredMaterias.length} de {materias.length} materias.
-            {filteredMaterias.length > 0 && (
-              <span className="ml-2 text-green-600">
-                {Math.round((filteredMaterias.filter(m => m.activo).length / filteredMaterias.length) * 100)}% activas
-              </span>
-            )}
-          </CardDescription>
+          <CardTitle>Listado de Materias ({filtered.length})</CardTitle>
         </CardHeader>
-        <CardContent>
-          {filteredMaterias.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Info className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <p>No se encontraron materias con los filtros actuales.</p>
-              <Button variant="outline" className="mt-2" onClick={() => {
-                setSearchTerm("");
-                setFilterNivel("todos");
-                setFilterGrado("todos");
-                setFilterActivo("todos");
-                setFilterArea("todos");
-              }}>
-                Limpiar filtros
-              </Button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {filteredMaterias.map((materia) => (
-                <Card 
-                  key={materia.id} 
-                  className={`relative overflow-hidden transition-all hover:shadow-lg border-l-4 ${
-                    !materia.activo ? 'opacity-70 border-l-gray-300' : 
-                    materia.nivelEducativo === 'inicial' ? 'border-l-pink-400' :
-                    materia.nivelEducativo === 'primaria' ? 'border-l-blue-400' :
-                    'border-l-green-400'
-                  }`}
-                >
-                  <CardContent className="p-5">
-                    {/* Header con título y acciones */}
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex-1 pr-2">
-                        <h3 className="font-bold text-lg text-foreground line-clamp-2 mb-1">
-                          {materia.nombre}
-                        </h3>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {getNivelBadge(materia.nivelEducativo)}
-                          <Badge variant="outline" className="bg-gray-50 text-gray-700">
-                            {materia.grado}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="flex gap-1 flex-shrink-0">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => abrirModalEditar(materia)}
-                          className="h-8 w-8"
-                        >
-                          <Edit className="h-3 w-3" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => handleDeleteMateria(materia.id, materia.nombre)}
-                          className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Descripción */}
-                    <p className="text-sm text-muted-foreground line-clamp-3 mb-4 leading-relaxed">
-                      {materia.descripcion}
-                    </p>
-
-                    {/* Información principal */}
-                    <div className="space-y-3 mb-4">
-                      <div className="flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <BookText className="h-4 w-4" />
-                          <span>Área:</span>
-                        </div>
-                        <span className="font-medium text-foreground text-right text-xs">
-                          {materia.areaDesarrollo}
-                        </span>
-                      </div>
-                      
-                      <div className="flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Clock className="h-4 w-4" />
-                          <span>Horas:</span>
-                        </div>
-                        <span className="font-medium text-foreground">{materia.horasSemanales}h/semana</span>
-                      </div>
-
-                      <div className="flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Calendar className="h-4 w-4" />
-                          <span>Creación:</span>
-                        </div>
-                        <span className="font-medium text-foreground text-xs">
-                          {formatFecha(materia.fechaCreacion)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Docente */}
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <UserCheck className="h-4 w-4" />
-                          <span>Docente:</span>
-                        </div>
-                        {materia.docenteAsignado ? (
-                          <span className="font-medium text-foreground text-right text-xs max-w-[120px] truncate">
-                            {materia.docenteAsignado}
-                          </span>
-                        ) : (
-                          <Badge variant="outline" className="text-orange-600 border-orange-200 text-xs">
-                            <Users2 className="h-2 w-2 mr-1" />
-                            Sin asignar
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Enfoque */}
-                    <div className="mb-4">
-                      {getEnfoqueBadge(materia.enfoque)}
-                    </div>
-
-                    {/* Competencias */}
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Target className="h-4 w-4" />
-                        <span>Competencias:</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {materia.competencias.slice(0, 3).map((competencia, index) => (
-                          <Badge 
-                            key={index} 
-                            variant="outline" 
-                            className="text-xs bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 transition-colors"
-                          >
-                            {competencia}
-                          </Badge>
-                        ))}
-                        {materia.competencias.length > 3 && (
-                          <Badge variant="secondary" className="text-xs">
-                            +{materia.competencias.length - 3} más
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Footer con estado y acciones */}
-                    <div className="flex items-center justify-between mt-4 pt-4 border-t">
-                      <div className="flex items-center gap-2">
-                        <Badge className={getActivoBadgeColors(materia.activo)}>
-                          {materia.activo ? 
-                            <CheckCircle className="h-3 w-3 mr-1" /> : 
-                            <XCircle className="h-3 w-3 mr-1" />
-                          }
-                          {materia.activo ? "Activa" : "Inactiva"}
-                        </Badge>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => toggleEstadoMateria(materia.id, materia.nombre, materia.activo)}
-                          className="h-6 w-6 p-0"
-                        >
-                          {materia.activo ? 
-                            <XCircle className="h-3 w-3 text-red-500" /> : 
-                            <CheckCircle className="h-3 w-3 text-green-500" />
-                          }
-                        </Button>
-                      </div>
-                      
-                      <div className="text-xs text-muted-foreground">
-                        ID: {materia.id}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+        <CardContent className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Código</TableHead>
+                <TableHead>Nombre</TableHead>
+                <TableHead>Nivel</TableHead>
+                <TableHead>Curso</TableHead>
+                <TableHead>Área</TableHead>
+                <TableHead>Horas/Sem</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead className="text-right">Acciones</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map(m => (
+                <TableRow key={m.id}>
+                  <TableCell className="font-mono text-xs">{m.codigo}</TableCell>
+                  <TableCell className="font-medium">{m.nombre}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={nivelColor[m.nivel]}>
+                      {m.nivel.toUpperCase()}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{m.curso}</TableCell>
+                  <TableCell className="text-sm max-w-[200px] truncate" title={m.area}>{m.area}</TableCell>
+                  <TableCell className="text-center">
+                    <Badge variant="secondary">{m.horasSemanales}h</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge 
+                      variant={m.activo ? "default" : "outline"}
+                      className={m.activo ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}
+                    >
+                      {m.activo ? "Activa" : "Inactiva"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right space-x-1">
+                    <Button size="sm" variant="ghost" onClick={() => toggleActivo(m.id)} title="Cambiar estado">
+                      {m.activo ? <XCircle className="h-4 w-4 text-red-500" /> : <CheckCircle className="h-4 w-4 text-green-500" />}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => openEdit(m)}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => remove(m.id)}>
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </div>
-          )}
+              {filtered.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                    No hay materias que coincidan con los filtros
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
-      {/* Modal */}
-      <Dialog open={modalAbierto} onOpenChange={setModalAbierto}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      {/* Modal Crear/Editar */}
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <BookMarked className="h-5 w-5 text-blue-600" />
-              {materiaEditando ? `Editar Materia: ${materiaEditando.nombre}` : 'Crear Nueva Materia'}
+              <BookText className="h-5 w-5" />
+              {editing ? "Editar Materia" : "Nueva Materia"}
             </DialogTitle>
             <DialogDescription>
-              {materiaEditando 
-                ? 'Modifica los datos de la materia seleccionada.' 
-                : 'Completa la información para agregar una nueva materia al sistema.'
-              }
+              {editing ? "Modifica los datos de la materia" : "Completa los datos para crear una nueva materia"}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="nombre">Nombre de la Materia *</Label>
+              <Label>Código</Label>
               <Input
-                id="nombre"
-                placeholder="Ej: Matemáticas Básicas, Exploración Sensorial..."
-                value={formData.nombre}
-                onChange={(e) => setFormData({...formData, nombre: e.target.value})}
+                placeholder="Auto-generado si se deja vacío"
+                value={form.codigo}
+                onChange={e => setForm({ ...form, codigo: e.target.value })}
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="nivelEducativo">Nivel Educativo *</Label>
-              <Select value={formData.nivelEducativo} onValueChange={(value: 'inicial' | 'primaria' | 'secundaria') => handleNivelChange(value)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inicial">Inicial</SelectItem>
-                  <SelectItem value="primaria">Primaria</SelectItem>
-                  <SelectItem value="secundaria">Secundaria</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label>Nombre *</Label>
+              <Input
+                placeholder="Ej: Matemática, Comunicación..."
+                value={form.nombre}
+                onChange={e => setForm({ ...form, nombre: e.target.value })}
+              />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="grado">Grado *</Label>
-              <Select value={formData.grado} onValueChange={(value) => setFormData({...formData, grado: value})}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
+              <Label>Nivel Educativo *</Label>
+              <Select value={form.nivel} onValueChange={v => handleNivelChange(v as NivelKey)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {opcionesGrado[formData.nivelEducativo].map((grado) => (
-                    <SelectItem key={grado} value={grado}>{grado}</SelectItem>
+                  {NIVELES.map(n => (
+                    <SelectItem key={n} value={n}>{n.charAt(0).toUpperCase() + n.slice(1)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="horasSemanales">Horas Semanales</Label>
+              <Label>Curso *</Label>
+              <Select value={form.curso} onValueChange={v => setForm({ ...form, curso: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {cursosForm.map(c => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Área de Conocimiento *</Label>
+              <Select value={form.area} onValueChange={v => setForm({ ...form, area: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {areasForm.map(a => (
+                    <SelectItem key={a} value={a}>{a}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Horas Semanales</Label>
               <Input
-                id="horasSemanales"
                 type="number"
-                min="1"
-                max="10"
-                value={formData.horasSemanales}
-                onChange={(e) => setFormData({...formData, horasSemanales: parseInt(e.target.value) || 1})}
+                min={1}
+                max={10}
+                value={form.horasSemanales}
+                onChange={e => setForm({ ...form, horasSemanales: parseInt(e.target.value) || 1 })}
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="areaDesarrollo">Área de Desarrollo *</Label>
-              <Select value={formData.areaDesarrollo} onValueChange={(value) => setFormData({...formData, areaDesarrollo: value})}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {areasDesarrollo[formData.nivelEducativo].map((area) => (
-                    <SelectItem key={area} value={area}>{area}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="enfoque">Enfoque Principal</Label>
-              <Select value={formData.enfoque} onValueChange={(value: 'académico' | 'desarrollo' | 'artístico' | 'tecnológico') => setFormData({...formData, enfoque: value})}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="académico">Académico</SelectItem>
-                  <SelectItem value="desarrollo">Desarrollo</SelectItem>
-                  <SelectItem value="artístico">Artístico</SelectItem>
-                  <SelectItem value="tecnológico">Tecnológico</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
             <div className="md:col-span-2 space-y-2">
-              <Label htmlFor="descripcion">Descripción *</Label>
+              <Label>Descripción</Label>
               <Textarea
-                id="descripcion"
-                placeholder="Describe los objetivos, contenidos y metodología de la materia..."
-                value={formData.descripcion}
-                onChange={(e) => setFormData({...formData, descripcion: e.target.value})}
-                rows={3}
+                placeholder="Descripción de la materia, objetivos..."
+                value={form.descripcion}
+                onChange={e => setForm({ ...form, descripcion: e.target.value })}
+                rows={2}
               />
             </div>
 
             <div className="md:col-span-2 space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Competencias a Desarrollar *</Label>
-                <Button type="button" variant="outline" size="sm" onClick={agregarCompetencia}>
-                  <Plus className="h-3 w-3 mr-1" />
-                  Agregar
+                <Label>Competencias</Label>
+                <Button type="button" variant="outline" size="sm" onClick={addCompetencia}>
+                  <Plus className="h-3 w-3 mr-1" /> Agregar
                 </Button>
               </div>
               <div className="space-y-2">
-                {formData.competencias.map((competencia, index) => (
-                  <div key={index} className="flex gap-2">
+                {form.competencias.map((c, i) => (
+                  <div key={i} className="flex gap-2">
                     <Input
-                      placeholder={`Competencia ${index + 1}...`}
-                      value={competencia}
-                      onChange={(e) => actualizarCompetencia(index, e.target.value)}
+                      placeholder={`Competencia ${i + 1}...`}
+                      value={c}
+                      onChange={e => updateCompetencia(i, e.target.value)}
                     />
-                    {formData.competencias.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => eliminarCompetencia(index)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="h-4 w-4" />
+                    {form.competencias.length > 1 && (
+                      <Button type="button" variant="ghost" size="icon" onClick={() => removeCompetencia(i)}>
+                        <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     )}
                   </div>
@@ -930,27 +610,22 @@ export default function AdminMaterias() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="activo">Estado de la Materia</Label>
+              <Label>Estado</Label>
               <div className="flex items-center gap-2 pt-2">
                 <Switch
-                  id="activo"
-                  checked={formData.activo}
-                  onCheckedChange={(checked) => setFormData({...formData, activo: checked})}
+                  checked={form.activo}
+                  onCheckedChange={checked => setForm({ ...form, activo: checked })}
                 />
-                <Label htmlFor="activo" className={formData.activo ? "text-green-600" : "text-red-600"}>
-                  {formData.activo ? "Activa" : "Inactiva"}
-                </Label>
+                <span className={form.activo ? "text-green-600" : "text-red-600"}>
+                  {form.activo ? "Activa" : "Inactiva"}
+                </span>
               </div>
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setModalAbierto(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={guardarMateria} className="bg-blue-600 hover:bg-blue-700">
-              {materiaEditando ? 'Actualizar Materia' : 'Crear Materia'}
-            </Button>
+            <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
+            <Button onClick={onSubmit}>{editing ? "Actualizar" : "Crear"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

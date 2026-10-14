@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   BookOpen,
   Save,
@@ -14,8 +15,10 @@ import {
   User,
   Edit,
   XCircle,
+  AlertCircle,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import NotasService from '@/services/notasService.ts';
 
 // --- Tipos de Datos ---
 interface Alumno {
@@ -67,28 +70,32 @@ export default function RegistroValoracion() {
   const [criteriosEditables, setCriteriosEditables] = useState<{[key: string]: string}>({});
   const [fechasEvaluacion, setFechasEvaluacion] = useState<{[key: string]: string}>({});
   const [editandoCriterios, setEditandoCriterios] = useState<boolean>(false);
+  const [advertenciasValidacion, setAdvertenciasValidacion] = useState<string[]>([]);
   const { toast } = useToast();
 
-  // --- DATOS SIMULADOS ---
+
+ // --- DATOS SIMULADOS ---
   const docenteId = 1;
+  const docenteNombre = 'ANGULO MONTALVO DANIELA';
   const gestionActual = '2025';
+  const cursoId = '1-B'; // Para sincronización con Calificaciones
 
   const alumnos: Alumno[] = useMemo(() => [
-    { id: 1, nombre: 'ARIA MICHELLE', apellido: 'ABASTO LIMACHI', grado: '1', grupo: 'B' },
-    { id: 2, nombre: 'AILEEN', apellido: 'ARCANGEL PACO', grado: '1', grupo: 'B' },
-    { id: 3, nombre: 'EMIR SAID', apellido: 'BAUTISTA PRIETO', grado: '1', grupo: 'B' },
-    { id: 4, nombre: 'LEANDRO JULIAN', apellido: 'CALLE ARANDIA', grado: '1', grupo: 'B' },
-    { id: 5, nombre: 'JHESLIE', apellido: 'CASTRO PEREZ', grado: '1', grupo: 'B' },
-    { id: 6, nombre: 'WARA CIELO', apellido: 'CESPEDES ARANCIBIA', grado: '1', grupo: 'B' },
-    { id: 7, nombre: 'ABEL GUILLERMO', apellido: 'ENCINAS AGREDA', grado: '1', grupo: 'B' },
-    { id: 8, nombre: 'ARIANA', apellido: 'ENCINAS ZEBALLOS', grado: '1', grupo: 'B' },
-    { id: 9, nombre: 'CRISTHIAN LEONARDO', apellido: 'GALVEZ QUINTEROS', grado: '1', grupo: 'B' },
+    { id: 101, nombre: 'ARIA MICHELLE', apellido: 'ABASTO LIMACHI', grado: '1', grupo: 'B' },
+    { id: 102, nombre: 'AILEEN', apellido: 'ARCANGEL PACO', grado: '1', grupo: 'B' },
+    { id: 103, nombre: 'EMIR SAID', apellido: 'BAUTISTA PRIETO', grado: '1', grupo: 'B' },
+    { id: 104, nombre: 'LEANDRO JULIAN', apellido: 'CALLE ARANDIA', grado: '1', grupo: 'B' },
+    { id: 105, nombre: 'JHESLIE', apellido: 'CASTRO PEREZ', grado: '1', grupo: 'B' },
+    { id: 106, nombre: 'WARA CIELO', apellido: 'CESPEDES ARANCIBIA', grado: '1', grupo: 'B' },
+    { id: 107, nombre: 'ABEL GUILLERMO', apellido: 'ENCINAS AGREDA', grado: '1', grupo: 'B' },
+    { id: 108, nombre: 'ARIANA', apellido: 'ENCINAS ZEBALLOS', grado: '1', grupo: 'B' },
+    { id: 109, nombre: 'CRISTHIAN LEONARDO', apellido: 'GALVEZ QUINTEROS', grado: '1', grupo: 'B' },
   ], []);
 
   const materias: Materia[] = useMemo(() => [
-    { id: 1, nombre: 'RELIGIÓN', codigo: 'RELI', grado: '1', grupo: 'B' },
-    { id: 2, nombre: 'MATEMÁTICAS', codigo: 'MATE', grado: '1', grupo: 'B' },
-    { id: 3, nombre: 'LENGUAJE', codigo: 'LC1', grado: '1', grupo: 'B' },
+    { id: 1001, nombre: 'RELIGIÓN', codigo: 'RELI', grado: '1', grupo: 'B' },
+    { id: 1002, nombre: 'MATEMÁTICAS', codigo: 'MATE', grado: '1', grupo: 'B' },
+    { id: 1003, nombre: 'LENGUAJE', codigo: 'LC1', grado: '1', grupo: 'B' },
   ], []);
 
   // Criterios de evaluación por categoría
@@ -352,29 +359,55 @@ export default function RegistroValoracion() {
   };
 
   const handleSave = () => {
-    try {
-      if (selectedMateria) {
-        const storageKey = `registro-valoracion:${selectedMateria}:${trimestre}`;
-        const criteriosKey = `criterios:${selectedMateria}`;
-        const fechasKey = `fechas:${selectedMateria}:${trimestre}`;
-        
-        localStorage.setItem(storageKey, JSON.stringify(notasAlumnos));
-        localStorage.setItem(criteriosKey, JSON.stringify(criteriosEditables));
-        localStorage.setItem(fechasKey, JSON.stringify(fechasEvaluacion));
-        
-        toast({ 
-          title: 'Registro guardado', 
-          description: 'El registro de valoración se guardó correctamente.' 
-        });
-        setIsEditing(false);
-        setEditandoCriterios(false);
-      }
-    } catch (e) {
+    if (!selectedMateria) return;
+
+    const materiaObj = materias.find(m => m.id.toString() === selectedMateria);
+    if (!materiaObj) return;
+
+    // 🚀 Usar NotasService para guardar con validación, sincronización y auditoría
+    const resultado = NotasService.guardarNotas(
+      notasAlumnos,
+      parseInt(selectedMateria),
+      materiaObj.nombre,
+      trimestre,
+      cursoId,
+      docenteId,
+      docenteNombre,
+      alumnos,
+      criteriosEditables,
+      fechasEvaluacion
+    );
+
+    if (resultado.success) {
       toast({ 
-        title: 'Error al guardar', 
-        description: 'No fue posible guardar el registro.',
+        title: '✅ Registro guardado exitosamente', 
+        description: `Notas guardadas y sincronizadas con Calificaciones.`,
+      });
+      
+      // Mostrar advertencias si las hay
+      if (resultado.advertencias.length > 0) {
+        setAdvertenciasValidacion(resultado.advertencias);
+      } else {
+        setAdvertenciasValidacion([]);
+      }
+      
+      setIsEditing(false);
+      setEditandoCriterios(false);
+      
+      console.log('📊 Resumen de guardado:');
+      console.log('- Notas guardadas:', notasAlumnos.length);
+      console.log('- Sincronizado con Calificaciones');
+      console.log('- Auditoría registrada');
+      if (resultado.advertencias.length > 0) {
+        console.log('⚠️ Advertencias:', resultado.advertencias);
+      }
+    } else {
+      toast({ 
+        title: '❌ Error al guardar', 
+        description: resultado.errores.join(', '),
         variant: 'destructive'
       });
+      setAdvertenciasValidacion(resultado.errores);
     }
   };
 
@@ -512,6 +545,21 @@ export default function RegistroValoracion() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Panel de advertencias de validación */}
+      {advertenciasValidacion.length > 0 && (
+        <Alert variant="destructive" className="bg-amber-50 border-amber-300">
+          <AlertCircle className="h-4 w-4 text-amber-600" />
+          <AlertDescription className="text-amber-800">
+            <div className="font-semibold mb-2">⚠️ Advertencias de validación:</div>
+            <ul className="list-disc list-inside space-y-1 text-sm">
+              {advertenciasValidacion.map((adv, idx) => (
+                <li key={idx}>{adv}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Estadísticas */}
       {selectedMateria && (

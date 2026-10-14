@@ -1,7 +1,8 @@
 // src/services/gradebookApi.ts
 import type { GradebookData } from "@/components/gradebook/Gradebook";
+import { API_BASE } from "@/lib/config";
 
-const API = (import.meta as any).env?.VITE_API_BASE || "";
+const API = API_BASE;
 const TIMEOUT_MS = 8000;
 const RETRIES = 1; // reintentos (además del intento inicial)
 
@@ -95,7 +96,7 @@ async function fetchWithRetry(input: RequestInfo, init?: RequestInit, retries = 
 // Obtiene el gradebook. Usa If-None-Match si tenemos ETag cacheado.
 // Si la red falla o devuelve error, intenta la caché; si no hay, lanza error.
 export async function getGradebook(sectionId: string): Promise<GradebookData> {
-  const url = `${API}/api/gradebook?section_id=${encodeURIComponent(sectionId)}`;
+  const url = `${API}/gradebook?section_id=${encodeURIComponent(sectionId)}`;
   const cached = readCache(sectionId);
   const headers: Record<string, string> = {};
   if (cached?.etag) headers["If-None-Match"] = cached.etag;
@@ -134,7 +135,7 @@ export async function getGradebook(sectionId: string): Promise<GradebookData> {
 // Guarda el gradebook. Incluye If-Match si tenemos ETag para control de concurrencia.
 // Si falla, guarda en caché y encola para sincronizar luego.
 export async function saveGradebook(sectionId: string, payload: GradebookData): Promise<void> {
-  const url = `${API}/api/grades/save`;
+  const url = `${API}/grades/save`;
   const cached = readCache(sectionId);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (cached?.etag) headers["If-Match"] = cached.etag;
@@ -187,7 +188,7 @@ export async function unlockGradebook(sectionId: string) {
 }
 
 async function lockToggle(sectionId: string, locked: boolean) {
-  const url = `${API}/api/grades/lock`;
+  const url = `${API}/grades/lock`;
   try {
     const r = await fetchWithRetry(url, {
       method: "POST",
@@ -241,7 +242,7 @@ export async function syncGradebookQueue(): Promise<{ processed: number; remaini
 
 // ==== Online helpers (sin encolar en caso de error) ====
 async function saveGradebookOnline(sectionId: string, payload: GradebookData) {
-  const url = `${API}/api/grades/save`;
+  const url = `${API}/grades/save`;
   const cached = readCache(sectionId);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (cached?.etag) headers["If-Match"] = cached.etag;
@@ -268,7 +269,7 @@ async function saveGradebookOnline(sectionId: string, payload: GradebookData) {
 }
 
 async function lockToggleOnline(sectionId: string, locked: boolean) {
-  const url = `${API}/api/grades/lock`;
+  const url = `${API}/grades/lock`;
   const r = await fetchWithRetry(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

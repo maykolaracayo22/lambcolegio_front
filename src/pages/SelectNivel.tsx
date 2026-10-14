@@ -1,7 +1,10 @@
 // src/pages/SelectNivel.tsx
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { getMyTeacherProfile, getMyTeacherSections, type TeacherAssignedSection, type TeacherPortalProfile } from "@/services/teachersApi";
 import {
   BookOpenText,
   ClipboardList,
@@ -23,6 +26,70 @@ import userPhoto from "@/assets/logo.png";
 
 export default function SelectNivel() {
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const isTeacher = user?.role === "teacher";
+  const year = String(new Date().getFullYear());
+  const levelItems = [
+    { slug: "inicial", label: "Inicial", path: "/dashboard/inicial" },
+    { slug: "primaria", label: "Primaria", path: "/dashboard/primaria" },
+    { slug: "secundaria", label: "Secundaria", path: "/dashboard/secundaria" },
+  ] as const;
+  const [teacherProfile, setTeacherProfile] = useState<TeacherPortalProfile | null>(null);
+  const [sectionsByLevel, setSectionsByLevel] = useState<Record<string, TeacherAssignedSection[]>>({});
+  const [loadingTeacherData, setLoadingTeacherData] = useState(false);
+  const [teacherLoadError, setTeacherLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isTeacher) return;
+    let cancelled = false;
+    setLoadingTeacherData(true);
+    Promise.all([
+      getMyTeacherProfile(year),
+      Promise.all(levelItems.map((level) => getMyTeacherSections(year, level.slug))),
+    ])
+      .then(([profile, levelResponses]) => {
+        if (cancelled) return;
+        setTeacherProfile(profile);
+        setSectionsByLevel(Object.fromEntries(levelItems.map((level, index) => [level.slug, levelResponses[index].data || []])));
+        setTeacherLoadError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const err = error as { response?: { data?: { message?: string } }; message?: string };
+        setTeacherLoadError(err.response?.data?.message || err.message || "No se pudieron cargar tus asignaciones.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTeacherData(false);
+      });
+    return () => { cancelled = true; };
+  }, [isTeacher, year]);
+
+  const displayName = useMemo(() => {
+    const profileName = [teacherProfile?.nombres, teacherProfile?.apellidos].filter(Boolean).join(" ");
+    return profileName || [user?.teacher?.nombre, user?.teacher?.apellido].filter(Boolean).join(" ") || user?.name || "Docente";
+  }, [teacherProfile, user]);
+
+  const enterLevel = (nivel: string, nivelLabel: string, fallbackPath: string) => {
+    if (!isTeacher) {
+      navigate(fallbackPath);
+      return;
+    }
+
+    const id = teacherProfile?.id ?? user?.teacherId;
+    if (id) {
+      localStorage.setItem("teacherId", String(id));
+      localStorage.setItem("teacherName", displayName);
+      localStorage.setItem(`tt:${id}:nivel`, nivel);
+      localStorage.setItem(`tt:${id}:nivelLabel`, nivelLabel);
+      localStorage.setItem("nivel", nivel);
+      localStorage.setItem("nivelLabel", nivelLabel);
+    }
+    navigate("/dashboard/teacher", { state: { nivel, nivelLabel } });
+  };
+
+  const assignedLevelCount = levelItems.filter((level) => (sectionsByLevel[level.slug] || []).length > 0).length;
+  const assignedSectionCount = levelItems.reduce((count, level) => count + (sectionsByLevel[level.slug] || []).length, 0);
+  const assignedSubjectCount = levelItems.reduce((count, level) => count + (sectionsByLevel[level.slug] || []).reduce((sum, section) => sum + section.assignments.length, 0), 0);
 
   // Componente de Tile mejorado para los niveles
   const NivelTile = ({
@@ -136,8 +203,8 @@ export default function SelectNivel() {
             <NivelTile
               label="Inicial"
               icon={BookOpenText}
-              onClick={() => navigate("/dashboard/inicial")}
-              description="Educación temprana y desarrollo infantil integral"
+              onClick={() => enterLevel("inicial", "Inicial", "/dashboard/inicial")}
+              description={isTeacher ? (loadingTeacherData ? "Consultando tus cursos…" : `${sectionsByLevel.inicial?.length || 0} curso(s) asignado(s)`) : "Educación temprana y desarrollo infantil integral"}
               accentColor="from-yellow-400 to-orange-500"
               textColor="text-yellow-700"
               delay={0}
@@ -146,8 +213,8 @@ export default function SelectNivel() {
             <NivelTile
               label="Primaria"
               icon={School}
-              onClick={() => navigate("/dashboard/primaria")}
-              description="Formación básica y desarrollo de competencias"
+              onClick={() => enterLevel("primaria", "Primaria", "/dashboard/primaria")}
+              description={isTeacher ? (loadingTeacherData ? "Consultando tus cursos…" : `${sectionsByLevel.primaria?.length || 0} curso(s) asignado(s)`) : "Formación básica y desarrollo de competencias"}
               accentColor="from-green-400 to-emerald-600"
               textColor="text-green-700"
               delay={150}
@@ -156,8 +223,8 @@ export default function SelectNivel() {
             <NivelTile
               label="Secundaria"
               icon={ClipboardList}
-              onClick={() => navigate("/dashboard/secundaria")}
-              description="Educación media y preparación universitaria"
+              onClick={() => enterLevel("secundaria", "Secundaria", "/dashboard/secundaria")}
+              description={isTeacher ? (loadingTeacherData ? "Consultando tus cursos…" : `${sectionsByLevel.secundaria?.length || 0} curso(s) asignado(s)`) : "Educación media y preparación universitaria"}
               accentColor="from-blue-400 to-indigo-600"
               textColor="text-blue-700"
               delay={300}
@@ -216,8 +283,16 @@ export default function SelectNivel() {
               </div>
 
               {/* Información textual */}
-              <h2 className="text-xl font-bold text-white mb-1">David Robert Yucra Mamani</h2>
-              <p className="text-white/70 text-sm mb-2">Docente Titular</p>
+              <h2 className="text-xl font-bold text-white mb-1">{isTeacher ? displayName : user?.name || "Usuario"}</h2>
+              <p className="text-white/70 text-sm mb-2">{isTeacher ? teacherProfile?.especialidad || "Docente" : user?.email || "Usuario del sistema"}</p>
+              {isTeacher && (
+                <div className="text-xs text-white/60 space-y-1 mb-3">
+                  <p>{teacherProfile?.email || user?.email}</p>
+                  {teacherProfile?.ci && <p>CI: {teacherProfile.ci}</p>}
+                  {teacherProfile?.rda_numero && <p>RDA: {teacherProfile.rda_numero} · {teacherProfile.rda_estado || "Sin estado"}</p>}
+                  {teacherLoadError && <p className="text-amber-300">{teacherLoadError}</p>}
+                </div>
+              )}
               
               {/* Badge de institución */}
               <div className="inline-flex items-center gap-2 bg-blue-500/20 px-3 py-1 rounded-full border border-blue-500/30">
@@ -232,16 +307,16 @@ export default function SelectNivel() {
             {/* Estadísticas rápidas */}
             <div className="grid grid-cols-3 gap-3 mb-6">
               <div className="text-center p-3 bg-white/5 rounded-xl border border-white/10">
-                <div className="text-lg font-bold text-green-400">3</div>
+                <div className="text-lg font-bold text-green-400">{isTeacher ? (loadingTeacherData ? "…" : assignedLevelCount) : "3"}</div>
                 <div className="text-xs text-white/60">Niveles</div>
               </div>
               <div className="text-center p-3 bg-white/5 rounded-xl border border-white/10">
-                <div className="text-lg font-bold text-blue-400">12</div>
+                <div className="text-lg font-bold text-blue-400">{isTeacher ? (loadingTeacherData ? "…" : assignedSectionCount) : "12"}</div>
                 <div className="text-xs text-white/60">Cursos</div>
               </div>
               <div className="text-center p-3 bg-white/5 rounded-xl border border-white/10">
-                <div className="text-lg font-bold text-purple-400">A</div>
-                <div className="text-xs text-white/60">Activo</div>
+                <div className="text-lg font-bold text-purple-400">{isTeacher ? (loadingTeacherData ? "…" : assignedSubjectCount) : "A"}</div>
+                <div className="text-xs text-white/60">Materias</div>
               </div>
             </div>
 
@@ -253,10 +328,7 @@ export default function SelectNivel() {
                 className="w-full bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-600 hover:to-orange-700 
                          text-white font-semibold py-3 rounded-xl flex items-center justify-center 
                          transition-all duration-300 group shadow-lg hover:shadow-xl hover:scale-105"
-                onClick={() => {
-                  localStorage.removeItem("nivel");
-                  window.location.href = "/";
-                }}
+                onClick={async () => { await logout(); navigate("/", { replace: true }); }}
               >
                 <LogOut className="w-5 h-5 mr-3 group-hover:scale-110 transition-transform duration-200" />
                 CERRAR SESIÓN

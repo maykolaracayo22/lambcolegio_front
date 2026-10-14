@@ -11,15 +11,18 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 
 import type { Acta, AdminKPI, Term } from "@/lib/types-admin";
+import { NIVELES, type NivelKey } from "@/lib/catalogo-bolivia";
 import { getActas, validateBulk, lockBulk, publishBulk, createMissingActas } from "@/services/mockAdmin";
 
 const USER_ADMIN = { id: "admin", nombre: "Administrador" };
+
+type NivelFilter = NivelKey | "todos";
 
 export default function AdminOverview() {
   const years = useMemo(() => [new Date().getFullYear(), new Date().getFullYear() - 1], []);
   const [year, setYear] = useState<number>(years[0]);
   const [term, setTerm] = useState<Term>("T1");
-  const [nivel, setNivel] = useState<"inicial" | "primaria" | "secundaria" | "todos">("todos");
+  const [nivel, setNivel] = useState<NivelFilter>("todos");
 
   const actas = useMemo(() => {
     const f = nivel === "todos" ? {} : { nivel };
@@ -55,7 +58,7 @@ export default function AdminOverview() {
   const refsSeleccion = useMemo(() => actas.map(a => a.ref), [actas]);
 
   const doCreateActas = () => {
-    const created = createMissingActas(USER_ADMIN, year, term, nivel === "todos" ? undefined : { nivel: nivel as any });
+    const created = createMissingActas(USER_ADMIN, year, term, nivel === "todos" ? undefined : { nivel });
     toast.success(`Actas creadas: ${created}`);
   };
   const doValidate = () => {
@@ -90,13 +93,13 @@ export default function AdminOverview() {
               <SelectItem value="T3">T3</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={nivel} onValueChange={(v) => setNivel(v as any)}>
+          <Select value={nivel} onValueChange={(v) => setNivel(v as NivelFilter)}>
             <SelectTrigger className="w-[140px]"><SelectValue placeholder="Nivel" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="todos">Todos</SelectItem>
-              <SelectItem value="inicial">Inicial</SelectItem>
-              <SelectItem value="primaria">Primaria</SelectItem>
-              <SelectItem value="secundaria">Secundaria</SelectItem>
+              {NIVELES.map(n => (
+                <SelectItem key={n} value={n}>{n.charAt(0).toUpperCase() + n.slice(1)}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

@@ -5,13 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   ChevronLeft,
   ChevronRight,
   FileText,
-  
   CheckCircle,
   Star,
   TrendingUp,
@@ -19,13 +19,17 @@ import {
   Pencil,
   Save,
   X,
+  Award,
+  BookOpen,
+  Calculator,
+  User,
 } from 'lucide-react';
 
 // ------------------------------
 // Helpers de datos por NIVEL
 // ------------------------------
-const buildCoursesByLevel = (nivel) => {
-  // Por simplicidad, mismos docentes; ajusta con tu data real
+const buildCoursesByLevel = (nivel, grado, grupo) => {
+  // Materias reales según el centralizador del docente
   if (nivel === 'Inicial') {
     return [
       { id: 101, title: 'Comunicación', teacher: 'Ms. Ana', info: 'Inicial 5 años', place: 'Aula I-1', term: 'T1' },
@@ -34,14 +38,57 @@ const buildCoursesByLevel = (nivel) => {
     ];
   }
   if (nivel === 'Primaria') {
+    // 1°B Primaria - Materias del estudiante ARIA MICHELLE
+    if (grado === '1' && grupo === 'B') {
+      return [
+        { id: 1001, title: 'Religión', teacher: 'Prof. ANGULO MONTALVO DANIELA', info: '1° B Primaria', place: 'Aula 1-B', term: 'T1', codigo: 'RELI' },
+        { id: 1002, title: 'Matemáticas', teacher: 'Prof. ANGULO MONTALVO DANIELA', info: '1° B Primaria', place: 'Aula 1-B', term: 'T1', codigo: 'MATE' },
+        { id: 1003, title: 'Lenguaje y Comunicación', teacher: 'Prof. ANGULO MONTALVO DANIELA', info: '1° B Primaria', place: 'Aula 1-B', term: 'T1', codigo: 'LC1' },
+        { id: 1004, title: 'Ciencias Naturales', teacher: 'Prof. Martínez', info: '1° B Primaria', place: 'Laboratorio', term: 'T1', codigo: 'CNT' },
+        { id: 1005, title: 'Ciencias Sociales', teacher: 'Prof. Torres', info: '1° B Primaria', place: 'Aula 1-B', term: 'T1', codigo: 'CSO' },
+        { id: 1006, title: 'Educación Física', teacher: 'Prof. Vega', info: '1° B Primaria', place: 'Cancha', term: 'T1', codigo: 'EFI' },
+        { id: 1007, title: 'Artes Plásticas', teacher: 'Prof. Díaz', info: '1° B Primaria', place: 'Sala de Arte', term: 'T1', codigo: 'APV' },
+        { id: 1008, title: 'Música', teacher: 'Prof. León', info: '1° B Primaria', place: 'Sala de Música', term: 'T1', codigo: 'EMU' },
+      ];
+    }
+    // 2°B Primaria
+    if (grado === '2' && grupo === 'B') {
+      return [
+        { id: 1, title: 'Lenguaje y Comunicación 1', teacher: 'Prof. García', info: '2° B Primaria', place: 'Aula 2-B', term: 'T1', codigo: 'LC1' },
+        { id: 2, title: 'Inglés', teacher: 'Miss Smith', info: '2° B Primaria', place: 'Aula de Idiomas', term: 'T1', codigo: 'ING' },
+        { id: 3, title: 'Lectoescritura 1', teacher: 'Prof. García', info: '2° B Primaria', place: 'Aula 2-B', term: 'T1', codigo: 'LE-1' },
+        { id: 4, title: 'Ciencias Sociales', teacher: 'Prof. Torres', info: '2° B Primaria', place: 'Aula 2-B', term: 'T1', codigo: 'CSO' },
+        { id: 5, title: 'Educación Física', teacher: 'Prof. Vega', info: '2° B Primaria', place: 'Cancha', term: 'T1', codigo: 'EFI' },
+        { id: 6, title: 'Expresión Musical', teacher: 'Prof. León', info: '2° B Primaria', place: 'Sala de Música', term: 'T1', codigo: 'EMU' },
+        { id: 7, title: 'Artes Plásticas Visuales', teacher: 'Prof. Díaz', info: '2° B Primaria', place: 'Sala de Arte', term: 'T1', codigo: 'APV' },
+        { id: 8, title: 'Matemáticas', teacher: 'Prof. López', info: '2° B Primaria', place: 'Aula 2-B', term: 'T1', codigo: 'MATE' },
+        { id: 9, title: 'Tecnología y Técnica', teacher: 'Prof. Ramírez', info: '2° B Primaria', place: 'Taller', term: 'T1', codigo: 'TTE' },
+        { id: 10, title: 'Computación', teacher: 'Prof. Sánchez', info: '2° B Primaria', place: 'Lab. Computo', term: 'T1', codigo: 'COMP' },
+        { id: 11, title: 'Técnica Especialidad', teacher: 'Prof. Ramírez', info: '2° B Primaria', place: 'Taller', term: 'T1', codigo: 'TE-C' },
+        { id: 12, title: 'Ciencias Naturales', teacher: 'Prof. Martínez', info: '2° B Primaria', place: 'Laboratorio', term: 'T1', codigo: 'CNT' },
+        { id: 13, title: 'Religión', teacher: 'Prof. Morales', info: '2° B Primaria', place: 'Aula 2-B', term: 'T1', codigo: 'RELI' },
+      ];
+    }
+    // 4°A Primaria
+    if (grado === '4' && grupo === 'A') {
+      return [
+        { id: 14, title: 'Lenguaje y Comunicación', teacher: 'Prof. García', info: '4° A Primaria', place: 'Aula 4-A', term: 'T1', codigo: 'LC1' },
+        { id: 15, title: 'Inglés', teacher: 'Miss Brown', info: '4° A Primaria', place: 'Aula de Idiomas', term: 'T1', codigo: 'ING' },
+        { id: 16, title: 'Matemáticas', teacher: 'Prof. López', info: '4° A Primaria', place: 'Aula 4-A', term: 'T1', codigo: 'MATE' },
+        { id: 17, title: 'Ciencias Sociales', teacher: 'Prof. Torres', info: '4° A Primaria', place: 'Aula 4-A', term: 'T1', codigo: 'CSO' },
+        { id: 18, title: 'Ciencias Naturales', teacher: 'Prof. Martínez', info: '4° A Primaria', place: 'Laboratorio', term: 'T1', codigo: 'CNT' },
+        { id: 19, title: 'Educación Física', teacher: 'Prof. Vega', info: '4° A Primaria', place: 'Cancha', term: 'T1', codigo: 'EFI' },
+        { id: 20, title: 'Computación', teacher: 'Prof. Sánchez', info: '4° A Primaria', place: 'Lab. Computo', term: 'T1', codigo: 'COMP' },
+        { id: 21, title: 'Tecnología y Técnica', teacher: 'Prof. Ramírez', info: '4° A Primaria', place: 'Taller', term: 'T1', codigo: 'TTE' },
+        { id: 22, title: 'Artes Plásticas', teacher: 'Prof. Díaz', info: '4° A Primaria', place: 'Sala de Arte', term: 'T1', codigo: 'APV' },
+        { id: 23, title: 'Música', teacher: 'Prof. León', info: '4° A Primaria', place: 'Sala de Música', term: 'T1', codigo: 'EMU' },
+        { id: 24, title: 'Religión', teacher: 'Prof. Morales', info: '4° A Primaria', place: 'Aula 4-A', term: 'T1', codigo: 'RELI' },
+      ];
+    }
+    // Por defecto para primaria
     return [
       { id: 201, title: 'Comunicación', teacher: 'Prof. García', info: '3° Primaria', place: 'Aula P-3A', term: 'T1' },
       { id: 202, title: 'Matemática', teacher: 'Prof. López', info: '3° Primaria', place: 'Aula P-3A', term: 'T1' },
-      { id: 203, title: 'Ciencia y Tecnología', teacher: 'Prof. Martín', info: '3° Primaria', place: 'Laboratorio', term: 'T1' },
-      { id: 204, title: 'Personal Social', teacher: 'Prof. Torres', info: '3° Primaria', place: 'Aula P-3A', term: 'T1' },
-      { id: 205, title: 'Inglés', teacher: 'Miss Smith', info: '3° Primaria', place: 'Aula de Idiomas', term: 'T1' },
-      { id: 206, title: 'Arte y Cultura', teacher: 'Prof. Díaz', info: '3° Primaria', place: 'Sala de Arte', term: 'T1' },
-      { id: 207, title: 'Educación Física', teacher: 'Prof. Vega', info: '3° Primaria', place: 'Cancha', term: 'T1' },
     ];
   }
   // Secundaria
@@ -65,7 +112,95 @@ const nota0DataSeed = {
     { id: 'EV-04', nombre: 'Parcial',     tipo: 'Examen',   peso: 50, nota: 13 },
   ],
 };
+// Datos del estudiante actual (esto vendría del contexto de autenticación)
+const estudianteActual = {
+  id: 101,
+  nombre: 'ARIA MICHELLE',
+  apellido: 'ABASTO LIMACHI',
+  grado: '1',
+  grupo: 'B',
+  curso: '1-B',
+};
 
+// Función para obtener las materias según el curso del estudiante
+const getMateriasDelCurso = (grado: string, grupo: string) => {
+  // 1°B Primaria
+  if (grado === '1' && grupo === 'B') {
+    return [
+      { id: 1001, nombre: 'Religión', codigo: 'RELI' },
+      { id: 1002, nombre: 'Matemáticas', codigo: 'MATE' },
+      { id: 1003, nombre: 'Lenguaje y Comunicación', codigo: 'LC1' },
+      { id: 1004, nombre: 'Ciencias Naturales', codigo: 'CNT' },
+      { id: 1005, nombre: 'Ciencias Sociales', codigo: 'CSO' },
+      { id: 1006, nombre: 'Educación Física', codigo: 'EFI' },
+      { id: 1007, nombre: 'Artes Plásticas', codigo: 'APV' },
+      { id: 1008, nombre: 'Música', codigo: 'EMU' },
+    ];
+  }
+  // 2°B Primaria
+  if (grado === '2' && grupo === 'B') {
+    return [
+      { id: 1, nombre: 'Lenguaje y Comunicación 1', codigo: 'LC1' },
+      { id: 2, nombre: 'Inglés', codigo: 'ING' },
+      { id: 3, nombre: 'Lectoescritura 1', codigo: 'LE-1' },
+      { id: 4, nombre: 'Ciencias Sociales', codigo: 'CSO' },
+      { id: 5, nombre: 'Educación Física', codigo: 'EFI' },
+      { id: 6, nombre: 'Expresión Musical', codigo: 'EMU' },
+      { id: 7, nombre: 'Artes Plásticas Visuales', codigo: 'APV' },
+      { id: 8, nombre: 'Matemáticas', codigo: 'MATE' },
+      { id: 9, nombre: 'Tecnología y Técnica', codigo: 'TTE' },
+      { id: 10, nombre: 'Computación', codigo: 'COMP' },
+      { id: 11, nombre: 'Técnica Especialidad', codigo: 'TE-C' },
+      { id: 12, nombre: 'Ciencias Naturales', codigo: 'CNT' },
+      { id: 13, nombre: 'Religión', codigo: 'RELI' },
+    ];
+  }
+  // 4°A Primaria
+  if (grado === '4' && grupo === 'A') {
+    return [
+      { id: 14, nombre: 'Lenguaje y Comunicación', codigo: 'LC1' },
+      { id: 15, nombre: 'Inglés', codigo: 'ING' },
+      { id: 16, nombre: 'Matemáticas', codigo: 'MATE' },
+      { id: 17, nombre: 'Ciencias Sociales', codigo: 'CSO' },
+      { id: 18, nombre: 'Ciencias Naturales', codigo: 'CNT' },
+      { id: 19, nombre: 'Educación Física', codigo: 'EFI' },
+      { id: 20, nombre: 'Computación', codigo: 'COMP' },
+      { id: 21, nombre: 'Tecnología y Técnica', codigo: 'TTE' },
+      { id: 22, nombre: 'Artes Plásticas', codigo: 'APV' },
+      { id: 23, nombre: 'Música', codigo: 'EMU' },
+      { id: 24, nombre: 'Religión', codigo: 'RELI' },
+    ];
+  }
+  // Default
+  return [
+    { id: 1001, nombre: 'Religión', codigo: 'RELI' },
+    { id: 1002, nombre: 'Matemáticas', codigo: 'MATE' },
+    { id: 1003, nombre: 'Lenguaje y Comunicación', codigo: 'LC1' },
+  ];
+};
+
+// Materias del curso del estudiante (inicialización)
+const materiasDelCurso = getMateriasDelCurso(estudianteActual.grado, estudianteActual.grupo);
+
+// Interface para CalificacionFinal
+interface CalificacionFinal {
+  alumnoId: number;
+  alumnoNombre: string;
+  materiaId: number;
+  materiaNombre: string;
+  trimestre: number;
+  promedioSer: number;
+  promedioSaber: number;
+  promedioHacer: number;
+  promedioDecidir: number;
+  autoevaluacion: number;
+  tspe: number;
+  pruebaEscrita: number;
+  notaTrimestre: number;
+  promedioAnual: number | null;
+  estado: 'APROBADO' | 'REPROBADO' | 'EN_PROCESO';
+  fechaActualizacion: string;
+}
 export default function NotasAcademicas() {
   const navigate = useNavigate();
 
@@ -84,12 +219,12 @@ export default function NotasAcademicas() {
   // Cursos por nivel + edición de trimestre
   // -----------------------
   const [courses, setCourses] = useState(() =>
-    buildCoursesByLevel(nivel).map(c => ({ ...c, _edit: false, _draftTerm: c.term }))
+    buildCoursesByLevel(nivel, estudianteActual.grado, estudianteActual.grupo).map(c => ({ ...c, _edit: false, _draftTerm: c.term }))
   );
 
   // Si cambia el nivel o el año, reiniciamos la lista (puedes cambiar a caching si quieres)
   useEffect(() => {
-    const next = buildCoursesByLevel(nivel).map(c => ({ ...c, _edit: false, _draftTerm: c.term }));
+    const next = buildCoursesByLevel(nivel, estudianteActual.grado, estudianteActual.grupo).map(c => ({ ...c, _edit: false, _draftTerm: c.term }));
     setCourses(next);
   }, [nivel, year]);
 
@@ -118,21 +253,25 @@ export default function NotasAcademicas() {
   };
 
   // -----------------------
-  // Nota 0 (modal)
+  // Nota 0 (modal) - Centralizador del Alumno
   // -----------------------
   const [nota0Open, setNota0Open] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [docenteNota, setDocenteNota] = useState(null);
+  const [calificacionesCentralizador, setCalificacionesCentralizador] = useState<CalificacionFinal[]>([]);
 
   // Funciones de cálculo (copiadas de RegistroValoracion)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const calcularPromedioCategoria = (notasAlumno: any, categoria: string): number => {
     if (!notasAlumno || !notasAlumno[categoria]) return 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const valores = Object.values(notasAlumno[categoria]).filter((v: any) => v !== null) as number[];
     if (valores.length === 0) return 0;
     const suma = valores.reduce((acc: number, val: number) => acc + val, 0);
     return Math.round(suma / valores.length);
   };
   
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const calcularTsPE = (notasAlumno: any) => {
     const ser = calcularPromedioCategoria(notasAlumno, 'ser');
     const saber = calcularPromedioCategoria(notasAlumno, 'saber');
@@ -142,11 +281,99 @@ export default function NotasAcademicas() {
     return ser + saber + hacer + decidir + auto;
   };
   
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const calcularSegundoTrimestre = (notasAlumno: any) => {
     const tspe = calcularTsPE(notasAlumno);
     const pe = 0; // Prueba escrita no implementada por defecto
     return tspe + pe;
   };
+
+  // Función para obtener el color de la nota
+  const getGradeColor = (nota: number | null) => {
+    if (nota === null || nota === 0) return 'gray';
+    if (nota < 51) return 'red';
+    if (nota < 81) return 'yellow';
+    return 'emerald';
+  };
+
+  const getGradeClasses = (nota: number | null) => {
+    const color = getGradeColor(nota);
+    switch (color) {
+      case 'red':
+        return 'bg-red-100 text-red-800';
+      case 'yellow':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'emerald':
+        return 'bg-emerald-100 text-emerald-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  // Cargar notas del centralizador (desde localStorage como lo hace el docente)
+  const cargarCalificacionesCentralizador = React.useCallback(() => {
+    const calificaciones: CalificacionFinal[] = [];
+    const trimestreNum = parseInt(globalTerm.replace('T', ''));
+    
+    // Cargar desde gradebook:calificaciones (formato que usa el docente)
+    const storageKey = `gradebook:calificaciones:${estudianteActual.curso}:${trimestreNum}`;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // Filtrar solo las calificaciones del estudiante actual
+        if (Array.isArray(parsed)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          parsed.forEach((item: any) => {
+            if (item.alumnoId === estudianteActual.id) {
+              calificaciones.push(item);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Error al cargar calificaciones:', e);
+    }
+
+    // También buscar en formato NotaFinal simple
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].nota !== undefined) {
+          // Es formato NotaFinal
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          parsed.forEach((item: any) => {
+            if (item.alumnoId === estudianteActual.id) {
+              const materia = materiasDelCurso.find(m => m.id === item.materiaId);
+              calificaciones.push({
+                alumnoId: item.alumnoId,
+                alumnoNombre: `${estudianteActual.nombre} ${estudianteActual.apellido}`,
+                materiaId: item.materiaId,
+                materiaNombre: materia?.nombre || 'Materia',
+                trimestre: trimestreNum,
+                promedioSer: 0,
+                promedioSaber: 0,
+                promedioHacer: 0,
+                promedioDecidir: 0,
+                autoevaluacion: 0,
+                tspe: 0,
+                pruebaEscrita: 0,
+                notaTrimestre: item.nota || 0,
+                promedioAnual: null,
+                estado: (item.nota || 0) >= 51 ? 'APROBADO' : 'REPROBADO',
+                fechaActualizacion: new Date().toISOString(),
+              });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Error:', e);
+    }
+
+    setCalificacionesCentralizador(calificaciones);
+  }, [globalTerm]);
   
   // Cargar nota del docente (de localStorage) cuando se abre el modal
   useEffect(() => {
@@ -156,7 +383,10 @@ export default function NotasAcademicas() {
         const raw = localStorage.getItem(key);
         if (raw) {
           const parsed = JSON.parse(raw);
-          setDocenteNota(parsed?.[0] || null); // tomamos primera entrada (propio alumno)
+          // Buscar la nota del estudiante actual
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const notaEstudiante = parsed?.find((n: any) => n.alumnoId === estudianteActual.id);
+          setDocenteNota(notaEstudiante || null);
         } else {
           setDocenteNota(null);
         }
@@ -167,6 +397,25 @@ export default function NotasAcademicas() {
     }
   }, [nota0Open, selectedCourse]);
 
+  // Cargar centralizador cuando cambia el trimestre
+  useEffect(() => {
+    cargarCalificacionesCentralizador();
+  }, [globalTerm, cargarCalificacionesCentralizador]);
+
+  // Obtener nota de una materia específica del centralizador
+  const getNotaMateria = (materiaId: number): number | null => {
+    const cal = calificacionesCentralizador.find(c => c.materiaId === materiaId);
+    return cal?.notaTrimestre || null;
+  };
+
+  // Calcular promedio general del alumno
+  const getPromedioGeneral = (): number | null => {
+    const notasValidas = calificacionesCentralizador.filter(c => c.notaTrimestre > 0);
+    if (notasValidas.length === 0) return null;
+    const suma = notasValidas.reduce((acc, c) => acc + c.notaTrimestre, 0);
+    return Math.round(suma / notasValidas.length);
+  };
+
   const nota0DataByCourseId = useMemo(() => {
     // Puedes diferenciar por nivel/curso si quieres variación
     const out = {};
@@ -175,7 +424,26 @@ export default function NotasAcademicas() {
   }, [courses]);
 
   const exportCSV = () => {
-    if (!selectedCourse) return;
+    // Si no hay curso seleccionado, exportar centralizador
+    if (!selectedCourse) {
+      const header = ['Nro', 'Materia', 'Código', 'Nota', 'Estado'];
+      const csvRows = [
+        header.join(','),
+        ...materiasDelCurso.map((m, i) => {
+          const nota = getNotaMateria(m.id);
+          const estado = nota !== null && nota >= 51 ? 'APROBADO' : nota !== null ? 'REPROBADO' : 'SIN NOTA';
+          return [i + 1, m.nombre, m.codigo, nota || 0, estado].join(',');
+        }),
+      ];
+      const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `centralizador_${estudianteActual.id}_${year}_${globalTerm}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
     const rows = nota0DataByCourseId[selectedCourse.id] || [];
     const header = ['ID', 'Evaluación', 'Tipo', 'Peso (%)', 'Nota'];
     const csvRows = [
@@ -192,7 +460,26 @@ export default function NotasAcademicas() {
   };
 
   const exportXLSX = () => {
-    if (!selectedCourse) return;
+    // Si no hay curso seleccionado, exportar centralizador
+    if (!selectedCourse) {
+      const header = ['Nro', 'Materia', 'Código', 'Nota', 'Estado'];
+      const csvRows = [
+        header.join(','),
+        ...materiasDelCurso.map((m, i) => {
+          const nota = getNotaMateria(m.id);
+          const estado = nota !== null && nota >= 51 ? 'APROBADO' : nota !== null ? 'REPROBADO' : 'SIN NOTA';
+          return [i + 1, m.nombre, m.codigo, nota || 0, estado].join(',');
+        }),
+      ];
+      const blob = new Blob([csvRows.join('\n')], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `centralizador_${estudianteActual.id}_${year}_${globalTerm}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
     const rows = nota0DataByCourseId[selectedCourse.id] || [];
     const header = ['ID', 'Evaluación', 'Tipo', 'Peso (%)', 'Nota'];
     const csvRows = [
@@ -209,11 +496,7 @@ export default function NotasAcademicas() {
   };
 
   const descargarBoletin = () => {
-    alert(`Descargando boletín PDF de ${selectedCourse?.title} — ${nivel} ${year} ${selectedCourse?.term}`);
-  };
-
-  const verDetalleCurso = () => {
-    navigate('/dashboard/parent/notas-academicas#nota0');
+    alert(`Descargando boletín PDF de ${estudianteActual.nombre} ${estudianteActual.apellido} — ${nivel} ${year} ${globalTerm}`);
   };
 
   // -----------------------
@@ -221,6 +504,12 @@ export default function NotasAcademicas() {
   // -----------------------
   const handleNota0 = (course) => {
     setSelectedCourse(course);
+    setNota0Open(true);
+  };
+
+  // Abrir centralizador general (sin curso específico)
+  const handleVerCentralizador = () => {
+    setSelectedCourse(null);
     setNota0Open(true);
   };
   const handleConducta = (course) => {
@@ -318,10 +607,18 @@ export default function NotasAcademicas() {
         {/* Lista de cursos */}
         <div className="lg:w-2/5 space-y-4">
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg">
                 {nivel} — {year}
               </CardTitle>
+              {/* Botón para ver centralizador general */}
+              <Button 
+                onClick={handleVerCentralizador}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
+              >
+                <Award className="h-4 w-4" />
+                Ver Mis Notas
+              </Button>
             </CardHeader>
           </Card>
 
@@ -371,17 +668,8 @@ export default function NotasAcademicas() {
                     className="flex items-center justify-start text-muted-foreground hover:text-foreground hover:bg-muted"
                     onClick={() => handleNota0(course)}
                   >
-                    <FileText className="h-4 w-4" />
-                    <span className="ml-1">Nota 0</span>
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center justify-start text-muted-foreground hover:text-foreground hover:bg-muted"
-                    disabled
-                  >
-                    {/* Centralizador eliminado - usar Nota 0 para ver evaluaciones por trimestre */}
+                    <Award className="h-4 w-4" />
+                    <span className="ml-1">Ver Nota</span>
                   </Button>
 
                   <Button
@@ -508,97 +796,307 @@ export default function NotasAcademicas() {
         </div>
       </div>
 
-      {/* Modal Nota 0 */}
+      {/* Modal Nota 0 - Centralizador del Alumno o Detalle por Materia */}
       <Dialog open={nota0Open} onOpenChange={setNota0Open}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              Nota 0 {selectedCourse ? `— ${selectedCourse.title} (${nivel} ${year} ${selectedCourse.term})` : ''}
+            <DialogTitle className="flex items-center gap-2">
+              <Award className="h-6 w-6 text-blue-500" />
+              {selectedCourse 
+                ? `Detalle de Nota - ${selectedCourse.title}`
+                : `Centralizador de Notas - ${estudianteActual.nombre} ${estudianteActual.apellido}`
+              }
             </DialogTitle>
             <DialogDescription>
-              Resumen de evaluaciones (peso y notas registradas).
+              {selectedCourse 
+                ? `${selectedCourse.info} — Docente: ${selectedCourse.teacher} — ${globalTerm}`
+                : `${nivel} — ${estudianteActual.grado}° ${estudianteActual.grupo} — Gestión ${year} — ${globalTerm}`
+              }
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={exportCSV}>
-                <Download className="h-4 w-4 mr-2" /> Exportar CSV
-              </Button>
-              <Button size="sm" variant="secondary" onClick={exportXLSX}>
-                <Download className="h-4 w-4 mr-2" /> Exportar XLSX
-              </Button>
-              <Button size="sm" variant="outline" onClick={descargarBoletin}>
-                <FileText className="h-4 w-4 mr-2" /> Descargar boletín
-              </Button>
-              <Button size="sm" onClick={verDetalleCurso}>
-                Ver detalle
-              </Button>
-            </div>
+          <div className="space-y-4">
+            {/* === VISTA ESPECÍFICA DE UNA MATERIA === */}
+            {selectedCourse ? (
+              <>
+                {/* Información de la materia */}
+                <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-4">
+                      <div className="h-14 w-14 rounded-full bg-indigo-500 flex items-center justify-center">
+                        <BookOpen className="h-7 w-7 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-bold text-xl text-indigo-800">{selectedCourse.title}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {selectedCourse.info} | {selectedCourse.place}
+                        </p>
+                        <p className="text-sm font-medium text-indigo-600">
+                          Docente: {selectedCourse.teacher}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground mb-1">Nota del Trimestre</p>
+                        <Badge className={`text-2xl px-4 py-2 ${getGradeClasses(getNotaMateria(selectedCourse.id))}`}>
+                          {getNotaMateria(selectedCourse.id) !== null ? getNotaMateria(selectedCourse.id) : '--'}
+                        </Badge>
+                        <p className="text-xs mt-1">
+                          {getNotaMateria(selectedCourse.id) !== null && getNotaMateria(selectedCourse.id)! >= 51 
+                            ? <span className="text-green-600 font-medium">APROBADO</span>
+                            : getNotaMateria(selectedCourse.id) !== null 
+                              ? <span className="text-red-600 font-medium">REPROBADO</span>
+                              : <span className="text-gray-500">SIN NOTA</span>
+                          }
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
-            {/* Resumen de calificaciones docentes si existen */}
-            {docenteNota && (
-              <Card className="mb-4">
-                <CardHeader>
-                  <CardTitle className="text-sm">Calificación registrada por docente</CardTitle>
-                  <CardDescription className="text-xs">
-                    Promedios calculados según criterios SER/SABER/HACER/DECIDIR
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-4 bg-gradient-to-br from-sky-50 to-sky-100 rounded-md">
-                      <p className="text-sm text-muted-foreground">TsPE (Ser/Saber/Hacer/Decidir)</p>
-                      <div className="text-2xl font-bold text-sky-600">{calcularTsPE(docenteNota)}</div>
-                      <Progress value={calcularTsPE(docenteNota)} className="mt-2" />
+                {/* Detalle de valoración por dimensiones (si existe) */}
+                {docenteNota ? (
+                  <Card className="border-blue-200">
+                    <CardHeader>
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Star className="h-4 w-4 text-yellow-500" />
+                        Valoración por Dimensiones - {selectedCourse.title}
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        Calificación registrada por el docente según criterios SER/SABER/HACER/DECIDIR
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg text-center">
+                          <p className="text-xs text-muted-foreground mb-1">SER (5 pts)</p>
+                          <div className="text-2xl font-bold text-blue-600">{calcularPromedioCategoria(docenteNota, 'ser')}</div>
+                          <Progress value={calcularPromedioCategoria(docenteNota, 'ser') * 20} className="mt-2 h-2" />
+                        </div>
+                        <div className="p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-lg text-center">
+                          <p className="text-xs text-muted-foreground mb-1">SABER (45 pts)</p>
+                          <div className="text-2xl font-bold text-green-600">{calcularPromedioCategoria(docenteNota, 'saber')}</div>
+                          <Progress value={calcularPromedioCategoria(docenteNota, 'saber') * 2.22} className="mt-2 h-2" />
+                        </div>
+                        <div className="p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg text-center">
+                          <p className="text-xs text-muted-foreground mb-1">HACER (40 pts)</p>
+                          <div className="text-2xl font-bold text-orange-600">{calcularPromedioCategoria(docenteNota, 'hacer')}</div>
+                          <Progress value={calcularPromedioCategoria(docenteNota, 'hacer') * 2.5} className="mt-2 h-2" />
+                        </div>
+                        <div className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg text-center">
+                          <p className="text-xs text-muted-foreground mb-1">DECIDIR (5 pts)</p>
+                          <div className="text-2xl font-bold text-purple-600">{calcularPromedioCategoria(docenteNota, 'decidir')}</div>
+                          <Progress value={calcularPromedioCategoria(docenteNota, 'decidir') * 20} className="mt-2 h-2" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                        <div className="p-4 bg-gradient-to-br from-sky-50 to-sky-100 rounded-lg">
+                          <p className="text-xs text-muted-foreground">TsPE (Total sin Prueba Escrita)</p>
+                          <div className="text-3xl font-bold text-sky-600">{calcularTsPE(docenteNota)}</div>
+                          <Progress value={calcularTsPE(docenteNota)} className="mt-2" />
+                        </div>
+                        <div className="p-4 bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-lg">
+                          <p className="text-xs text-muted-foreground">Nota del Trimestre</p>
+                          <div className="text-3xl font-bold text-emerald-600">{calcularSegundoTrimestre(docenteNota)}</div>
+                          <Progress value={calcularSegundoTrimestre(docenteNota)} className="mt-2" />
+                        </div>
+                        <div className="p-4 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg">
+                          <p className="text-xs text-muted-foreground">Autoevaluación</p>
+                          <div className="text-3xl font-bold text-indigo-600">{docenteNota?.autoevaluacion || 0}</div>
+                          <Progress value={(docenteNota?.autoevaluacion || 0) * 20} className="mt-2" />
+                        </div>
+                      </div>
+
+                      {/* Promedio acumulado */}
+                      <div className="mt-4 p-4 bg-gradient-to-r from-amber-50 to-yellow-50 rounded-lg border border-amber-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-amber-800">Promedio Acumulado</p>
+                            <p className="text-xs text-muted-foreground">1er Trimestre + 2do Trimestre</p>
+                          </div>
+                          <div className="text-right">
+                            {(() => {
+                              const t1 = docenteNota?.primerTrimestre || 0;
+                              const t2 = calcularSegundoTrimestre(docenteNota);
+                              const pa = Math.round(((t1 || 0) + (t2 || 0)) / ((t1 ? 1 : 0) + (t2 ? 1 : 0) || 1));
+                              return (
+                                <Badge className={`text-2xl px-4 py-2 ${getGradeClasses(pa)}`}>{pa}</Badge>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card className="border-gray-200">
+                    <CardContent className="p-8 text-center">
+                      <BookOpen className="h-16 w-16 mx-auto text-gray-300 mb-4" />
+                      <h3 className="text-lg font-medium text-gray-600">Sin calificaciones detalladas</h3>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        El docente aún no ha registrado las calificaciones detalladas por dimensiones para esta materia.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Botón para ver centralizador completo */}
+                <div className="flex justify-center">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setSelectedCourse(null)}
+                    className="flex items-center gap-2"
+                  >
+                    <Award className="h-4 w-4" />
+                    Ver Centralizador Completo
+                  </Button>
+                </div>
+              </>
+            ) : (
+              /* === VISTA DEL CENTRALIZADOR COMPLETO === */
+              <>
+                {/* Información del estudiante */}
+                <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-full bg-blue-500 flex items-center justify-center">
+                        <User className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-lg">{estudianteActual.apellido} {estudianteActual.nombre}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {estudianteActual.grado}° {estudianteActual.grupo} - {nivel} | Gestión {year}
+                        </p>
+                      </div>
+                      <div className="ml-auto flex items-center gap-2">
+                        <Calculator className="h-5 w-5 text-blue-500" />
+                        <span className="text-sm font-medium">Promedio General:</span>
+                        <Badge className={`text-lg ${getGradeClasses(getPromedioGeneral())}`}>
+                          {getPromedioGeneral() !== null ? getPromedioGeneral() : '--'}
+                        </Badge>
+                      </div>
                     </div>
-                    <div className="p-4 bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-md">
-                      <p className="text-sm text-muted-foreground">Segundo Trimestre</p>
-                      <div className="text-2xl font-bold text-emerald-600">{calcularSegundoTrimestre(docenteNota)}</div>
-                      <Progress value={calcularSegundoTrimestre(docenteNota)} className="mt-2" />
+                  </CardContent>
+                </Card>
+
+                {/* Botones de exportación */}
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" onClick={exportCSV}>
+                    <Download className="h-4 w-4 mr-2" /> Exportar CSV
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={exportXLSX}>
+                    <Download className="h-4 w-4 mr-2" /> Exportar XLSX
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={descargarBoletin}>
+                    <FileText className="h-4 w-4 mr-2" /> Descargar Boletín
+                  </Button>
+                </div>
+
+                {/* Tabla Centralizador de Notas por Materia */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <BookOpen className="h-5 w-5 text-blue-500" />
+                      MIS CALIFICACIONES - {globalTerm.toUpperCase()}° TRIMESTRE
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse border">
+                        <thead>
+                          <tr className="bg-muted/50">
+                            <th className="border p-2 text-center font-bold w-12">Nro</th>
+                            <th className="border p-2 text-left font-bold">MATERIA</th>
+                            <th className="border p-2 text-center font-bold w-20">CÓDIGO</th>
+                            <th className="border p-2 text-center font-bold w-24 bg-blue-50">NOTA</th>
+                            <th className="border p-2 text-center font-bold w-28">ESTADO</th>
+                            <th className="border p-2 text-center font-bold w-24">ACCIÓN</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {materiasDelCurso.map((materia, index) => {
+                            const nota = getNotaMateria(materia.id);
+                            const estado = nota !== null && nota >= 51 ? 'APROBADO' : nota !== null ? 'REPROBADO' : 'SIN NOTA';
+                            // Buscar el curso correspondiente para ver detalle
+                            const cursoMateria = courses.find(c => c.id === materia.id);
+                            return (
+                              <tr key={materia.id} className="hover:bg-muted/30 transition-colors">
+                                <td className="border p-2 text-center font-medium">{index + 1}</td>
+                                <td className="border p-2 font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <BookOpen className="h-4 w-4 text-muted-foreground" />
+                                    {materia.nombre}
+                                  </div>
+                                </td>
+                                <td className="border p-2 text-center">
+                                  <Badge variant="outline">{materia.codigo}</Badge>
+                                </td>
+                                <td className="border p-2 text-center">
+                                  <Badge className={`${getGradeClasses(nota)} font-bold text-base`}>
+                                    {nota !== null ? nota : '--'}
+                                  </Badge>
+                                </td>
+                                <td className="border p-2 text-center">
+                                  <Badge 
+                                    variant={estado === 'APROBADO' ? 'default' : estado === 'REPROBADO' ? 'destructive' : 'outline'}
+                                    className={estado === 'APROBADO' ? 'bg-green-500' : ''}
+                                  >
+                                    {estado}
+                                  </Badge>
+                                </td>
+                                <td className="border p-2 text-center">
+                                  {cursoMateria && (
+                                    <Button 
+                                      size="sm" 
+                                      variant="ghost"
+                                      onClick={() => {
+                                        setSelectedCourse(cursoMateria);
+                                      }}
+                                      className="text-blue-600 hover:text-blue-800"
+                                    >
+                                      Ver detalle
+                                    </Button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {/* Fila de promedio */}
+                          <tr className="bg-blue-50 font-bold">
+                            <td className="border p-2" colSpan={3} />
+                            <td className="border p-2 text-center">
+                              <Badge className={`${getGradeClasses(getPromedioGeneral())} text-lg`}>
+                                {getPromedioGeneral() !== null ? getPromedioGeneral() : '--'}
+                              </Badge>
+                            </td>
+                            <td className="border p-2 text-center text-sm">PROMEDIO GENERAL</td>
+                            <td className="border p-2" />
+                          </tr>
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-md">
-                      <p className="text-sm text-muted-foreground">Promedio Acumulado</p>
-                      {(() => {
-                        const t1 = docenteNota?.primerTrimestre || 0;
-                        const t2 = calcularSegundoTrimestre(docenteNota);
-                        const pa = Math.round(((t1 || 0) + (t2 || 0)) / ((t1 ? 1 : 0) + (t2 ? 1 : 0) || 1));
-                        return (
-                          <>
-                            <div className="text-2xl font-bold text-purple-600">{pa}</div>
-                            <Progress value={pa} className="mt-2" />
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              </>
             )}
 
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>ID</TableHead>
-                    <TableHead>Evaluación</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Peso (%)</TableHead>
-                    <TableHead>Nota</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(selectedCourse ? (nota0DataByCourseId[selectedCourse.id] || []) : []).map((ev) => (
-                    <TableRow key={ev.id}>
-                      <TableCell>{ev.id}</TableCell>
-                      <TableCell>{ev.nombre}</TableCell>
-                      <TableCell>{ev.tipo}</TableCell>
-                      <TableCell>{ev.peso}</TableCell>
-                      <TableCell>{ev.nota}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            {/* Leyenda */}
+            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex flex-wrap items-center gap-4 text-xs">
+                <span className="font-medium">Leyenda:</span>
+                <div className="flex items-center gap-1">
+                  <div className="w-4 h-4 bg-emerald-100 border border-emerald-300 rounded"></div>
+                  <span>≥81 Excelente</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-4 h-4 bg-yellow-100 border border-yellow-300 rounded"></div>
+                  <span>51-80 Aprobado</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-4 h-4 bg-red-100 border border-red-300 rounded"></div>
+                  <span>&lt;51 Reprobado</span>
+                </div>
+              </div>
             </div>
           </div>
         </DialogContent>

@@ -10,6 +10,8 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useToast } from "@/hooks/use-toast";
+import axios from "axios";
 import {
   X,
   User,
@@ -37,6 +39,8 @@ import {
   QrCode
 } from "lucide-react";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+
 interface RudeFormModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -62,7 +66,7 @@ interface FormData {
   idiomaAprendizaje: string;
   autoidentificacion: string;
   
-  // Step 2: Dirección
+  // Step 2: Dirección y Tutor
   departamento: string;
   provincia: string;
   municipio: string;
@@ -79,6 +83,11 @@ interface FormData {
   servicioBasura: string;
   tipoVivienda: string;
   accesoInternet: string[];
+  // Datos del Tutor/Padre
+  tutorNombre: string;
+  tutorCi: string;
+  tutorParentesco: string;
+  tutorTelefono: string;
   
   // Step 3: Documentos
   certificadoNacimiento: File | null;
@@ -89,6 +98,7 @@ interface FormData {
 
 const RudeFormModal = ({ isOpen, onClose }: RudeFormModalProps) => {
   const [currentStep, setCurrentStep] = useState(1);
+  const { toast } = useToast();
   const [formData, setFormData] = useState<FormData>({
     // Step 1
     apellidoPaterno: "",
@@ -126,6 +136,11 @@ const RudeFormModal = ({ isOpen, onClose }: RudeFormModalProps) => {
     servicioBasura: "",
     tipoVivienda: "",
     accesoInternet: [],
+    // Datos del Tutor
+    tutorNombre: "",
+    tutorCi: "",
+    tutorParentesco: "",
+    tutorTelefono: "",
     
     // Step 3
     certificadoNacimiento: null,
@@ -250,14 +265,155 @@ const RudeFormModal = ({ isOpen, onClose }: RudeFormModalProps) => {
 
   // Envío del formulario
   const handleSubmit = async () => {
+    // Validaciones básicas - Step 1
+    if (!formData.apellidoPaterno || !formData.nombres || !formData.fechaNacimiento || 
+        !formData.sexo || !formData.nivelEducativo || !formData.grado) {
+      toast({
+        title: "Campos incompletos",
+        description: "Por favor complete todos los campos del estudiante (Paso 1)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validaciones - Step 2 (Tutor obligatorio)
+    if (!formData.tutorNombre || !formData.tutorParentesco) {
+      toast({
+        title: "Datos del tutor incompletos",
+        description: "Debe ingresar el nombre y parentesco del padre/madre o tutor",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validación de comprobante
+    if (!formData.comprobantePago) {
+      toast({
+        title: "Comprobante requerido",
+        description: "Debe adjuntar el comprobante de pago para continuar",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     
     try {
-      // Simular envío
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Convertir grado a número según el nivel educativo
+      const convertirGrado = (nivel: string, grado: string): number => {
+        if (nivel === "inicial") {
+          if (grado === "prekinder") return 1;
+          if (grado === "kinder1") return 2;
+          if (grado === "kinder2") return 3;
+        }
+        if (nivel === "primaria") {
+          const match = grado.match(/primaria(\d+)/);
+          return match ? parseInt(match[1]) : 1;
+        }
+        if (nivel === "secundaria") {
+          const match = grado.match(/secundaria(\d+)/);
+          return match ? parseInt(match[1]) + 6 : 7; // 7-12 para secundaria
+        }
+        return 1;
+      };
+
+      // Crear FormData para enviar archivos
+      const submitData = new window.FormData();
       
-      console.log("Formulario enviado:", formData);
-      alert("¡Preinscripción enviada correctamente! Recibirás una confirmación por WhatsApp.");
+      // Campos obligatorios del backend
+      submitData.append("nivel", formData.nivelEducativo);
+      submitData.append("grado", String(convertirGrado(formData.nivelEducativo, formData.grado)));
+      submitData.append("nombres", formData.nombres);
+      submitData.append("apellidos", `${formData.apellidoPaterno} ${formData.apellidoMaterno}`.trim());
+      submitData.append("sexo", formData.sexo);
+      submitData.append("fecha_nac", formData.fechaNacimiento);
+      submitData.append("tutor_nombre", formData.tutorNombre);
+      submitData.append("tutor_parentesco", formData.tutorParentesco);
+      
+      // Campos opcionales
+      if (formData.numeroDocumento) {
+        submitData.append("ci", formData.numeroDocumento);
+      }
+      
+      if (formData.paisNacimiento) {
+        submitData.append("nacionalidad", formData.paisNacimiento);
+      }
+      
+      if (formData.departamentoNacimiento) {
+        submitData.append("dep_nac", formData.departamentoNacimiento);
+      }
+      
+      if (formData.localidadNacimiento) {
+        submitData.append("muni_nac", formData.localidadNacimiento);
+      }
+      
+      // Construir dirección completa
+      const direccionCompleta = [
+        formData.zonaBarrio,
+        formData.direccion,
+        formData.numeroVivienda ? `Nº ${formData.numeroVivienda}` : "",
+        formData.localidad,
+        formData.municipio,
+        formData.provincia,
+        formData.departamento
+      ].filter(Boolean).join(", ");
+      
+      if (direccionCompleta) {
+        submitData.append("direccion", direccionCompleta);
+      }
+      
+      const telefono = formData.celular || formData.telefonoFijo;
+      if (telefono) {
+        submitData.append("telefono", telefono);
+      }
+      
+      if (formData.correo) {
+        submitData.append("email", formData.correo);
+      }
+      
+      if (formData.autoidentificacion && formData.autoidentificacion !== "ninguno") {
+        submitData.append("pueblo_indigena", formData.autoidentificacion);
+      }
+      
+      submitData.append("discapacidad", formData.discapacidad === "Si" ? "1" : "0");
+      
+      if (formData.idiomaAprendizaje) {
+        submitData.append("idiomas[]", formData.idiomaAprendizaje);
+      }
+      
+      if (formData.tutorCi) {
+        submitData.append("tutor_ci", formData.tutorCi);
+      }
+      
+      if (formData.tutorTelefono || formData.celular) {
+        submitData.append("tutor_telefono", formData.tutorTelefono || formData.celular);
+      }
+      
+      // Adjuntar comprobante de pago
+      if (formData.comprobantePago) {
+        submitData.append("comprobante", formData.comprobantePago);
+      }
+
+      // Debug: mostrar datos enviados
+      console.log("Datos enviados:");
+      for (const [key, value] of submitData.entries()) {
+        console.log(`${key}:`, value);
+      }
+
+      // Enviar a la API
+      const response = await axios.post(`${API_URL}/preinscriptions`, submitData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      const codigoPreinscripcion = response.data.codigo_preinscripcion;
+      
+      toast({
+        title: "¡Preinscripción enviada!",
+        description: `Su código de seguimiento es: ${codigoPreinscripcion}. Recibirá confirmación por correo/WhatsApp.`,
+      });
+      
       onClose();
       
       // Resetear formulario
@@ -295,15 +451,42 @@ const RudeFormModal = ({ isOpen, onClose }: RudeFormModalProps) => {
         servicioBasura: "",
         tipoVivienda: "",
         accesoInternet: [],
+        tutorNombre: "",
+        tutorCi: "",
+        tutorParentesco: "",
+        tutorTelefono: "",
         certificadoNacimiento: null,
         certificadoVacunas: null,
         fotografias: null,
         comprobantePago: null,
       });
       setCurrentStep(1);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al enviar el formulario:", error);
-      alert("Error al enviar el formulario. Por favor, intente nuevamente.");
+      console.error("Response data:", error.response?.data);
+      
+      // Mensaje de error detallado
+      let errorMessage = "Error al enviar el formulario. Por favor, intente nuevamente.";
+      
+      if (error.response?.data?.errors) {
+        const errors = error.response.data.errors;
+        // Mostrar todos los errores de validación
+        const errorMessages = Object.entries(errors).map(([field, messages]) => {
+          const fieldName = field.replace(/_/g, ' ');
+          const msg = Array.isArray(messages) ? messages[0] : String(messages);
+          return `${fieldName}: ${msg}`;
+        });
+        errorMessage = errorMessages.join('\n');
+        console.error("Errores de validación:", errors);
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+      
+      toast({
+        title: "Error de validación",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -964,6 +1147,77 @@ const RudeFormModal = ({ isOpen, onClose }: RudeFormModalProps) => {
                           </Label>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Datos del Tutor/Padre/Madre */}
+              <Card>
+                <CardHeader className="bg-slate-50 border-b">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Users className="h-5 w-5 text-blue-600" />
+                    DATOS DEL PADRE/MADRE O TUTOR
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">
+                        Nombre Completo del Tutor <span className="text-red-500">*</span>
+                      </Label>
+                      <Input
+                        value={formData.tutorNombre}
+                        onChange={(e) => handleInputChange("tutorNombre", e.target.value)}
+                        placeholder="Nombre completo del padre/madre o tutor"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">
+                        Parentesco <span className="text-red-500">*</span>
+                      </Label>
+                      <Select 
+                        value={formData.tutorParentesco} 
+                        onValueChange={(value) => handleInputChange("tutorParentesco", value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Seleccionar..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="padre">Padre</SelectItem>
+                          <SelectItem value="madre">Madre</SelectItem>
+                          <SelectItem value="abuelo_a">Abuelo/a</SelectItem>
+                          <SelectItem value="tio_a">Tío/a</SelectItem>
+                          <SelectItem value="hermano_a">Hermano/a mayor</SelectItem>
+                          <SelectItem value="tutor_legal">Tutor Legal</SelectItem>
+                          <SelectItem value="otro">Otro</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">
+                        Cédula de Identidad del Tutor
+                      </Label>
+                      <Input
+                        value={formData.tutorCi}
+                        onChange={(e) => handleInputChange("tutorCi", e.target.value)}
+                        placeholder="Número de CI del tutor"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">
+                        Teléfono del Tutor <span className="text-red-500">*</span>
+                      </Label>
+                      <Input
+                        value={formData.tutorTelefono}
+                        onChange={(e) => handleInputChange("tutorTelefono", e.target.value)}
+                        placeholder="Número de celular del tutor"
+                        required
+                      />
                     </div>
                   </div>
                 </CardContent>

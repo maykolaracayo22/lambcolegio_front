@@ -1,658 +1,521 @@
-/**
- * @file NotasAcademicas.tsx
- * @description Componente para la gestión y visualización de notas académicas
- * Permite ver las calificaciones por curso, nivel y trimestre, además de
- * gestionar la nota cero, conducta, progreso y asistencia.
- * 
- * @author yucradavid
- * @version 1.0.0
- * @lastModified 2025-11-03
- */
-
-import React, { useMemo, useState, useEffect } from 'react';
+// src/pages/parent/NotasAcademicas.tsx
+// CONECTADO AL BACKEND - Consume API real
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useToast } from '@/hooks/use-toast';
+import {
+  getChildGrades,
+  getChildInfo,
+  ChildSubjectGrades
+} from '@/services/parentPortalApi';
 import {
   ChevronLeft,
-  ChevronRight,
   FileText,
   CheckCircle,
   Star,
   TrendingUp,
   Download,
-  Pencil,
-  Save,
-  X,
-  Info,
+  RefreshCw,
+  BookOpen,
+  User,
+  Award,
+  AlertCircle,
+  Calendar
 } from 'lucide-react';
-import NivelBadge from '@/pages/parent/components/NivelBadge';
 
-// ------------------------------
-// Tipos e Interfaces
-// ------------------------------
-interface Course {
-  id: number;
-  title: string;
-  teacher: string;
-  info: string;
-  place: string;
-  term: string;
-  _edit?: boolean;
-  _draftTerm?: string;
-}
-
-interface Evaluacion {
-  id: string;
-  nombre: string;
-  tipo: 'Práctica' | 'Tarea' | 'Prueba' | 'Examen';
-  peso: number;
-  nota: number;
-}
-
-interface HorarioBloque {
-  day: string;
-  hour: number;
-  duration: number;
-  color: string;
-  label: string;
-}
-
-type NivelEducativo = 'Inicial' | 'Primaria' | 'Secundaria';
-type Trimestre = 'T1' | 'T2' | 'T3';
-
-// ------------------------------
-// Helpers de datos por NIVEL
-// ------------------------------
-const buildCoursesByLevel = (nivel: NivelEducativo): Course[] => {
-  const DEFAULT_TERM: Trimestre = 'T1';
-  
-  // Por simplicidad, mismos docentes; ajusta con tu data real
-  if (nivel === 'Inicial') {
-    return [
-      { id: 101, title: 'Comunicación', teacher: 'Ms. Ana', info: 'Inicial 5 años', place: 'Aula I-1', term: 'T1' },
-      { id: 102, title: 'Psicomotricidad', teacher: 'Ms. Carla', info: 'Inicial 5 años', place: 'Patio', term: 'T1' },
-      { id: 103, title: 'Arte y Juego', teacher: 'Ms. Sofía', info: 'Inicial 5 años', place: 'Aula I-2', term: 'T1' },
-    ];
-  }
-  if (nivel === 'Primaria') {
-    return [
-      { id: 201, title: 'Comunicación', teacher: 'Prof. García', info: '3° Primaria', place: 'Aula P-3A', term: 'T1' },
-      { id: 202, title: 'Matemática', teacher: 'Prof. López', info: '3° Primaria', place: 'Aula P-3A', term: 'T1' },
-      { id: 203, title: 'Ciencia y Tecnología', teacher: 'Prof. Martín', info: '3° Primaria', place: 'Laboratorio', term: 'T1' },
-      { id: 204, title: 'Personal Social', teacher: 'Prof. Torres', info: '3° Primaria', place: 'Aula P-3A', term: 'T1' },
-      { id: 205, title: 'Inglés', teacher: 'Miss Smith', info: '3° Primaria', place: 'Aula de Idiomas', term: 'T1' },
-      { id: 206, title: 'Arte y Cultura', teacher: 'Prof. Díaz', info: '3° Primaria', place: 'Sala de Arte', term: 'T1' },
-      { id: 207, title: 'Educación Física', teacher: 'Prof. Vega', info: '3° Primaria', place: 'Cancha', term: 'T1' },
-    ];
-  }
-  // Secundaria
-  return [
-    { id: 301, title: 'Comunicación', teacher: 'Prof. Rojas', info: '1° Secundaria', place: 'Aula S-1A', term: 'T1' },
-    { id: 302, title: 'Matemática', teacher: 'Prof. Castro', info: '1° Secundaria', place: 'Aula S-1A', term: 'T1' },
-    { id: 303, title: 'Ciencia y Tecnología', teacher: 'Prof. Medina', info: '1° Secundaria', place: 'Laboratorio', term: 'T1' },
-    { id: 304, title: 'Historia, Geografía y Economía', teacher: 'Prof. Quispe', info: '1° Secundaria', place: 'Aula S-1A', term: 'T1' },
-    { id: 305, title: 'Inglés', teacher: 'Miss Brown', info: '1° Secundaria', place: 'Aula de Idiomas', term: 'T1' },
-    { id: 306, title: 'Educación Física', teacher: 'Prof. Manco', info: '1° Secundaria', place: 'Cancha', term: 'T1' },
-    { id: 307, title: 'Arte y Cultura', teacher: 'Prof. León', info: '1° Secundaria', place: 'Sala de Arte', term: 'T1' },
-  ];
-};
-
-// Helper para calcular promedio ponderado
-const calculatePromedio = (evaluaciones: Evaluacion[]): number => {
-  if (!evaluaciones.length) return 0;
-  
-  const sumaPonderada = evaluaciones.reduce((acc, ev) => acc + (ev.nota * ev.peso), 0);
-  const sumaPesos = evaluaciones.reduce((acc, ev) => acc + ev.peso, 0);
-  
-  return Math.round((sumaPonderada / sumaPesos) * 10) / 10;
-};
-
-// Datos "mock" para Nota 0 por curso
-const nota0DataSeed = {
-  default: [
-    { id: 'EV-01', nombre: 'Diagnóstico', tipo: 'Práctica', peso: 10, nota: 15 },
-    { id: 'EV-02', nombre: 'Trabajo 1',   tipo: 'Tarea',    peso: 20, nota: 17 },
-    { id: 'EV-03', nombre: 'Quiz 1',      tipo: 'Prueba',   peso: 20, nota: 14 },
-    { id: 'EV-04', nombre: 'Parcial',     tipo: 'Examen',   peso: 50, nota: 13 },
-  ],
-};
+type Trimestre = 'T1' | 'T2' | 'T3' | 'Todos';
 
 export default function NotasAcademicas() {
   const navigate = useNavigate();
+  const { toast } = useToast();
 
-  // -----------------------
-  // Selectores globales (Nivel / Año / Trimestre)
-  // -----------------------
-  const niveles = useMemo<NivelEducativo[]>(() => ['Inicial', 'Primaria', 'Secundaria'], []);
-  const trimestres = useMemo<Trimestre[]>(() => ['T1', 'T2', 'T3'], []);
-  const years = useMemo(() => ['2025', '2024'], []);
+  // Estado de carga
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Datos del backend
+  const [grades, setGrades] = useState<ChildSubjectGrades[]>([]);
+  const [childInfo, setChildInfo] = useState<{
+    nombres: string; 
+    apellidos: string; 
+    nivel: string;
+    curso: string; 
+    paralelo: string
+  } | null>(null);
 
-  const [nivel, setNivel] = useState<NivelEducativo>('Primaria');
-  const [year, setYear] = useState('2025');
-  const [globalTerm, setGlobalTerm] = useState<Trimestre>('T1');
+  // Filtros
+  const [trimestre, setTrimestre] = useState<Trimestre>('Todos');
+  const [selectedSubject, setSelectedSubject] = useState<ChildSubjectGrades | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
-  // -----------------------
-  // Cursos por nivel + edición de trimestre
-  // -----------------------
-  const [courses, setCourses] = useState(() =>
-    buildCoursesByLevel(nivel).map(c => ({ ...c, _edit: false, _draftTerm: c.term }))
-  );
+  // Fetch datos
+  const fetchGrades = async () => {
+    try {
+      const gradesData = await getChildGrades();
+      setGrades(gradesData);
+      
+      const info = getChildInfo();
+      if (info) {
+        setChildInfo({
+          nombres: info.nombres,
+          apellidos: info.apellidos,
+          nivel: info.nivel,
+          curso: info.curso,
+          paralelo: info.paralelo
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error fetching grades:', error);
+      toast({
+        title: "Error",
+        description: "No se pudieron cargar las calificaciones",
+        variant: "destructive",
+      });
+    }
+  };
 
-  // Si cambia el nivel o el año, reiniciamos la lista (puedes cambiar a caching si quieres)
   useEffect(() => {
-    const next = buildCoursesByLevel(nivel).map(c => ({ ...c, _edit: false, _draftTerm: c.term }));
-    setCourses(next);
-  }, [nivel, year]);
+    const initFetch = async () => {
+      setLoading(true);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await fetchGrades();
+      setLoading(false);
+    };
+    initFetch();
+  }, []);
 
-  const applyGlobalTerm = () => {
-    setCourses(prev => prev.map(c => ({ ...c, term: globalTerm, _draftTerm: globalTerm })));
-    alert(`Trimestre ${globalTerm} aplicado a todos los cursos de ${nivel} ${year}`);
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchGrades();
+    setRefreshing(false);
+    toast({
+      title: "Actualizado",
+      description: "Calificaciones actualizadas correctamente",
+    });
   };
 
-  const toggleEdit = (id, v) => {
-    setCourses(prev => prev.map(c => (c.id === id ? { ...c, _edit: v, _draftTerm: c.term } : c)));
+  // Calcular estadísticas generales
+  const stats = useMemo(() => {
+    if (grades.length === 0) return { promedio: 0, aprobadas: 0, reprobadas: 0, total: 0 };
+    
+    const promedio = Math.round(grades.reduce((sum, g) => sum + g.promedioAnual, 0) / grades.length);
+    const aprobadas = grades.filter(g => g.aprobado).length;
+    const reprobadas = grades.filter(g => !g.aprobado).length;
+    
+    return { promedio, aprobadas, reprobadas, total: grades.length };
+  }, [grades]);
+
+  // Filtrar notas por trimestre
+  const filteredGrades = useMemo(() => {
+    if (trimestre === 'Todos') return grades;
+    
+    const trimNum = parseInt(trimestre.replace('T', ''));
+    return grades.map(subject => ({
+      ...subject,
+      notas: subject.notas.filter(n => n.bimestre === trimNum)
+    })).filter(subject => subject.notas.length > 0);
+  }, [grades, trimestre]);
+
+  // Helpers
+  const getNotaColor = (nota: number) => {
+    if (nota >= 80) return 'text-green-600 bg-green-100';
+    if (nota >= 51) return 'text-blue-600 bg-blue-100';
+    return 'text-red-600 bg-red-100';
   };
 
-  const updateDraftTerm = (id, term) => {
-    setCourses(prev => prev.map(c => (c.id === id ? { ...c, _draftTerm: term } : c)));
+  const getAprobadoBadge = (aprobado: boolean) => {
+    return aprobado 
+      ? <Badge className="bg-green-100 text-green-800">Aprobado</Badge>
+      : <Badge className="bg-red-100 text-red-800">En Riesgo</Badge>;
   };
 
-  const saveTerm = (id) => {
-    setCourses(prev => prev.map(c => (c.id === id ? { ...c, term: c._draftTerm, _edit: false } : c)));
-    const saved = courses.find(c => c.id === id);
-    alert(`Curso "${saved?.title}" actualizado a ${saved?._draftTerm || 'T1'}`);
-    // TODO: persistir en backend (fetch/axios/react-query) usando id, nivel, year, term
-  };
-
-  const cancelEdit = (id) => {
-    setCourses(prev => prev.map(c => (c.id === id ? { ...c, _edit: false, _draftTerm: c.term } : c)));
-  };
-
-  // -----------------------
-  // Nota 0 (modal)
-  // -----------------------
-  const [nota0Open, setNota0Open] = useState(false);
-  const [selectedCourse, setSelectedCourse] = useState(null);
-
-  const nota0DataByCourseId = useMemo(() => {
-    // Puedes diferenciar por nivel/curso si quieres variación
-    const out = {};
-    for (const c of courses) out[c.id] = nota0DataSeed.default;
-    return out;
-  }, [courses]);
-
-  const exportCSV = () => {
-    if (!selectedCourse) return;
-    const rows = nota0DataByCourseId[selectedCourse.id] || [];
-    const header = ['ID', 'Evaluación', 'Tipo', 'Peso (%)', 'Nota'];
-    const csvRows = [
-      header.join(','),
-      ...rows.map(r => [r.id, r.nombre, r.tipo, r.peso, r.nota].join(',')),
-    ];
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  // Exportar CSV
+  const exportarCSV = () => {
+    const header = ['Materia', 'Docente', 'B1', 'B2', 'B3', 'B4', 'Promedio', 'Estado'];
+    const rows = grades.map(g => {
+      const notasPorBim = [1, 2, 3, 4].map(bim => {
+        const nota = g.notas.find(n => n.bimestre === bim);
+        return nota ? nota.nota : '-';
+      });
+      return [
+        g.materia,
+        g.docente,
+        ...notasPorBim,
+        g.promedioAnual,
+        g.aprobado ? 'Aprobado' : 'Reprobado'
+      ].join(',');
+    });
+    
+    const csv = [header.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `nota0_${selectedCourse.id}_${year}_${selectedCourse.term}.csv`;
+    a.download = `notas_${childInfo?.nombres || 'estudiante'}_2025.csv`;
     a.click();
     URL.revokeObjectURL(url);
+    
+    toast({
+      title: "Exportado",
+      description: "Archivo CSV descargado exitosamente",
+    });
   };
 
-  const exportXLSX = () => {
-    if (!selectedCourse) return;
-    const rows = nota0DataByCourseId[selectedCourse.id] || [];
-    const header = ['ID', 'Evaluación', 'Tipo', 'Peso (%)', 'Nota'];
-    const csvRows = [
-      header.join(','),
-      ...rows.map(r => [r.id, r.nombre, r.tipo, r.peso, r.nota].join(',')),
-    ];
-    const blob = new Blob([csvRows.join('\n')], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `nota0_${selectedCourse.id}_${year}_${selectedCourse.term}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
+  // Ver detalle de materia
+  const handleVerDetalle = (subject: ChildSubjectGrades) => {
+    setSelectedSubject(subject);
+    setDetailOpen(true);
   };
 
-  const descargarBoletin = () => {
-    alert(`Descargando boletín PDF de ${selectedCourse?.title} — ${nivel} ${year} ${selectedCourse?.term}`);
-  };
+  // Navegar a otras secciones
+  const handleConducta = () => navigate('/dashboard/parent/conducta');
+  const handleProgreso = () => navigate('/dashboard/parent/progreso');
+  const handleAsistencia = () => navigate('/dashboard/parent/asistencia');
 
-  const verDetalleCurso = () => {
-    navigate('/dashboard/parent/notas-academicas#nota0');
-  };
-
-  // -----------------------
-  // Acciones por curso
-  // -----------------------
-  const handleNota0 = (course) => {
-    setSelectedCourse(course);
-    setNota0Open(true);
-  };
-  const handleConducta = (course) => {
-    navigate('/dashboard/parent/conducta', { state: { courseId: course.id, courseTitle: course.title } });
-  };
-  const handleProgreso = (course) => {
-    navigate('/dashboard/parent/progreso', { state: { courseId: course.id, courseTitle: course.title } });
-  };
-  const handleAsistencia = (course) => {
-    navigate('/dashboard/parent/asistencia', { state: { courseId: course.id, courseTitle: course.title } });
-  };
-
-  // -----------------------
-  // Calendario "dummy"
-  // -----------------------
-  const schedule = [
-    { day: 'lunes', hour: 1, duration: 2, color: 'bg-emerald-400', label: 'Com' },
-    { day: 'martes', hour: 2, duration: 2, color: 'bg-sky-400', label: 'Mat' },
-    { day: 'miércoles', hour: 4, duration: 2, color: 'bg-amber-400', label: 'CyT' },
-    { day: 'jueves', hour: 3, duration: 2, color: 'bg-pink-400', label: 'Ing' },
-    { day: 'viernes', hour: 1, duration: 2, color: 'bg-violet-400', label: 'Arte' },
-  ];
-  const hours = [...Array(12)].map((_, i) => `${7 + i}:00`);
-  const days = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-
-  return (
-    <div className="space-y-6 p-4">
-
-      {/* Barra superior: Nivel, Año, Trimestre global y Regresar */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center p-4 bg-white rounded-lg shadow-sm gap-4">
-        <h1 className="text-xl font-bold">Mis Cursos</h1>
-
-        {/* Badge de nivel visible */}
-        <div className="hidden md:flex items-center gap-3">
-          <div className="text-sm text-muted-foreground">Nivel actual:</div>
-          <NivelBadge nivel={nivel} />
-        </div>
-
-        <div className="flex flex-col lg:flex-row items-start lg:items-center gap-2 w-full lg:w-auto">
-          {/* Nivel */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Nivel:</span>
-            <Select 
-              value={nivel} 
-              onValueChange={(value: NivelEducativo) => setNivel(value)}
-            >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Nivel" />
-              </SelectTrigger>
-              <SelectContent>
-                {niveles.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
-              </SelectContent>
-            </Select>
+  // Loading skeleton
+  if (loading) {
+    return (
+      <div className="space-y-6 p-4">
+        <div className="flex justify-between items-start">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-4 w-64" />
           </div>
-
-          {/* Año */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Año:</span>
-            <Select value={year} onValueChange={setYear}>
-              <SelectTrigger className="w-[100px]">
-                <SelectValue placeholder="Año" />
-              </SelectTrigger>
-              <SelectContent>
-                {years.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Trimestre global */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Trimestre:</span>
-            <Select 
-              value={globalTerm} 
-              onValueChange={(value: Trimestre) => setGlobalTerm(value)}
-            >
-              <SelectTrigger className="w-[120px]">
-                <SelectValue placeholder="Trimestre" />
-              </SelectTrigger>
-              <SelectContent>
-                {trimestres.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Button variant="secondary" size="sm" onClick={applyGlobalTerm}>
-              Aplicar a todos
-            </Button>
-          </div>
-
-          <div className="flex items-center gap-2 ml-auto">
-            <Button
-              variant="outline"
-              className="flex items-center"
-              onClick={() => window.history.length > 1 ? navigate(-1) : navigate('/dashboard/parent')}
-            >
-              <ChevronLeft className="h-4 w-4 mr-2" />
-              REGRESAR
-            </Button>
+          <div className="flex gap-2">
+            <Skeleton className="h-10 w-32" />
+            <Skeleton className="h-10 w-32" />
           </div>
         </div>
-      </div>
-
-      {/* Contenido principal */}
-      <div className="flex flex-col lg:flex-row gap-6">
-
-        {/* Lista de cursos */}
-        <div className="lg:w-2/5 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">
-                {nivel} — {year}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-
-          {courses.map((course) => (
-            <Card key={course.id} className="hover:shadow-md transition-shadow">
-              <CardHeader className="space-y-2">
-                {/* Título + trimestre visible */}
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base font-bold">
-                    {course.title}
-                  </CardTitle>
-
-                  {/* Ver/Editar trimestre por curso */}
-                  {!course._edit ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Trimestre:</span>
-                      <span className="text-xs font-semibold">{course.term}</span>
-                      <Button variant="ghost" size="sm" onClick={() => toggleEdit(course.id, true)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <Select value={course._draftTerm} onValueChange={(v) => updateDraftTerm(course.id, v)}>
-                        <SelectTrigger className="w-[110px] h-8">
-                          <SelectValue placeholder="Trim." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {trimestres.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      <Button size="sm" onClick={() => saveTerm(course.id)}>
-                        <Save className="h-4 w-4 mr-1" /> Guardar
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => cancelEdit(course.id)}>
-                        <X className="h-4 w-4 mr-1" /> Cancelar
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Acciones por curso */}
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center justify-start text-muted-foreground hover:text-foreground hover:bg-muted"
-                    onClick={() => handleNota0(course)}
-                  >
-                    <FileText className="h-4 w-4" />
-                    <span className="ml-1">Nota 0</span>
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center justify-start text-muted-foreground hover:text-foreground hover:bg-muted"
-                    onClick={() => handleConducta(course)}
-                  >
-                    <Star className="h-4 w-4" />
-                    <span className="ml-1">Conducta</span>
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center justify-start text-muted-foreground hover:text-foreground hover:bg-muted"
-                    onClick={() => handleProgreso(course)}
-                  >
-                    <TrendingUp className="h-4 w-4" />
-                    <span className="ml-1">Progreso</span>
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center justify-start text-muted-foreground hover:text-foreground hover:bg-muted"
-                    onClick={() => handleAsistencia(course)}
-                  >
-                    <CheckCircle className="h-4 w-4" />
-                    <span className="ml-1">Asistencia</span>
-                  </Button>
-                </div>
-              </CardHeader>
-
-              <CardContent>
-                <div className="text-sm text-muted-foreground mb-2 space-y-1">
-                  <p className="font-medium text-foreground">Docente: {course.teacher}</p>
-                  <p>{course.info}</p>
-                  <p className="text-xs">Ambiente: {course.place}</p>
-                </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {[1,2,3,4].map(i => (
+            <Card key={i}>
+              <CardContent className="pt-6">
+                <Skeleton className="h-16 w-full" />
               </CardContent>
             </Card>
           ))}
         </div>
+        
+        <Card>
+          <CardContent className="pt-6">
+            <Skeleton className="h-80 w-full" />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-        {/* Calendario (dummy) */}
-        <div className="lg:w-3/5">
-          <Card className="h-full">
-            <CardHeader className="p-0">
-              <div className="bg-primary text-primary-foreground p-4 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 rounded-t-lg">
-                <h3 className="text-lg font-bold">Horario de Clases</h3>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="ghost" size="sm" className="bg-white/20 hover:bg-white/30 text-white">
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" className="bg-white/20 hover:bg-white/30 text-white">Atrás</Button>
-                  <Button variant="ghost" size="sm" className="bg-white/20 hover:bg-white/30 text-white">Hoy</Button>
-                  <Button variant="ghost" size="sm" className="bg-white/20 hover:bg-white/30 text-white">Siguiente</Button>
-                  <Button variant="ghost" size="sm" className="bg-white/20 hover:bg-white/30 text-white">
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-4">
-              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 gap-2">
-                <h4 className="text-lg font-semibold">{nivel} — Semana ejemplo ({year} {globalTerm})</h4>
-                <div className="flex space-x-2">
-                  <Button variant="outline" size="sm">Mes</Button>
-                  <Button variant="default" size="sm">Semana</Button>
-                  <Button variant="outline" size="sm">Día</Button>
-                </div>
-              </div>
+  return (
+    <div className="space-y-6 p-4">
+      {/* Header */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <BookOpen className="h-8 w-8 text-primary" />
+            Notas Académicas
+          </h1>
+          <p className="text-muted-foreground">
+            {childInfo ? `${childInfo.nombres} ${childInfo.apellidos} - ${childInfo.nivel} ${childInfo.curso} "${childInfo.paralelo}"` : 'Cargando...'}
+          </p>
+        </div>
 
-              <div className="overflow-x-auto">
-                <div className="grid grid-cols-8 text-center text-sm min-w-[800px]">
-                  <div className="text-center font-normal text-muted-foreground p-2 border-b"></div>
-                  {days.map((day, index) => (
-                    <div key={day} className={`p-2 border-b-2 font-bold ${day === 'viernes' ? 'text-primary' : 'text-foreground'}`}>
-                      {day.charAt(0).toUpperCase() + day.slice(1, 3)}
-                    </div>
-                  ))}
-
-                  {hours.map((hour, i) => (
-                    <React.Fragment key={i}>
-                      <div className="text-xs text-muted-foreground p-2 border-b text-right pr-3">
-                        {hour}
-                      </div>
-                      {[...Array(7)].map((_, j) => (
-                        <div key={j} className="h-12 border-b relative"></div>
-                      ))}
-                    </React.Fragment>
-                  ))}
-                </div>
-
-                {/* Bloques de ejemplo */}
-                <div className="relative min-w-[800px]">
-                  {schedule.map((block, index) => {
-                    const dayIndex = days.indexOf(block.day);
-                    const hourIndex = block.hour - 1; // arranque visual
-                    if (dayIndex === -1 || hourIndex < 0) return null;
-
-                    const top = hourIndex * 48;
-                    const height = block.duration * 48;
-                    const left = (dayIndex + 1) * (100/8);
-
-                    return (
-                      <div
-                        key={index}
-                        style={{ position: 'absolute', top: `${top}px`, left: `${left}%`, width: `${100/8}%`, height: `${height}px` }}
-                        className={`${block.color} rounded-md text-white text-xs flex items-center justify-center m-1 p-1 border border-white/20`}
-                      >
-                        <div className="text-center">
-                          <div className="font-bold">{block.label}</div>
-                          <div className="text-[10px] opacity-90">Bloque</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="flex flex-wrap gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            Actualizar
+          </Button>
+          <Button variant="outline" onClick={exportarCSV}>
+            <Download className="h-4 w-4 mr-2" />
+            Exportar
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => navigate(-1)}
+          >
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Regresar
+          </Button>
         </div>
       </div>
 
-      {/* Modal Nota 0 */}
-      <Dialog open={nota0Open} onOpenChange={setNota0Open}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-primary" />
-              Detalle de Calificaciones
-              {selectedCourse && (
-                <Badge variant="outline" className="ml-2">
-                  {selectedCourse.title} - {nivel} {year} {selectedCourse.term}
-                </Badge>
-              )}
-            </DialogTitle>
-            <DialogDescription>
-              Vista detallada del rendimiento académico y evaluaciones.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-6">
-            {/* Resumen Visual */}
-            {selectedCourse && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-primary mb-2">
-                        {calculatePromedio(nota0DataByCourseId[selectedCourse.id] || [])}
-                      </div>
-                      <p className="text-sm text-muted-foreground">Promedio General</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-emerald-500 mb-2">
-                        {(nota0DataByCourseId[selectedCourse.id] || []).filter(ev => ev.nota >= 51).length}
-                      </div>
-                      <p className="text-sm text-muted-foreground">Evaluaciones Aprobadas</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-orange-500 mb-2">
-                        {(nota0DataByCourseId[selectedCourse.id] || []).filter(ev => ev.nota < 51).length}
-                      </div>
-                      <p className="text-sm text-muted-foreground">Necesitan Atención</p>
-                    </div>
-                  </CardContent>
-                </Card>
+      {/* Estadísticas */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-muted-foreground">Promedio General</p>
+                <p className={`text-3xl font-bold ${stats.promedio >= 51 ? 'text-green-600' : 'text-red-600'}`}>
+                  {stats.promedio}
+                </p>
               </div>
-            )}
-
-            {/* Acciones */}
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={exportCSV}>
-                <Download className="h-4 w-4 mr-2" /> Exportar CSV
-              </Button>
-              <Button size="sm" variant="secondary" onClick={exportXLSX}>
-                <Download className="h-4 w-4 mr-2" /> Exportar XLSX
-              </Button>
-              <Button size="sm" variant="outline" onClick={descargarBoletin}>
-                <FileText className="h-4 w-4 mr-2" /> Descargar boletín
-              </Button>
-              <Button size="sm" onClick={verDetalleCurso}>
-                Ver detalle completo
-              </Button>
+              <div className={`p-2 rounded-full ${stats.promedio >= 51 ? 'bg-green-100' : 'bg-red-100'}`}>
+                <Award className={`h-5 w-5 ${stats.promedio >= 51 ? 'text-green-600' : 'text-red-600'}`} />
+              </div>
             </div>
+          </CardContent>
+        </Card>
 
-            {/* Tabla de notas con indicadores visuales */}
-            <div className="rounded-md border">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-muted-foreground">Materias Aprobadas</p>
+                <p className="text-3xl font-bold text-green-600">{stats.aprobadas}</p>
+              </div>
+              <div className="p-2 bg-green-100 rounded-full">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-muted-foreground">En Riesgo</p>
+                <p className="text-3xl font-bold text-red-600">{stats.reprobadas}</p>
+              </div>
+              <div className="p-2 bg-red-100 rounded-full">
+                <AlertCircle className="h-5 w-5 text-red-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-muted-foreground">Total Materias</p>
+                <p className="text-3xl font-bold">{stats.total}</p>
+              </div>
+              <div className="p-2 bg-blue-100 rounded-full">
+                <BookOpen className="h-5 w-5 text-blue-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filtro y acciones */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 p-4 bg-muted/50 rounded-lg">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Bimestre:</span>
+            <Select value={trimestre} onValueChange={(v: Trimestre) => setTrimestre(v)}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Bimestre" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Todos">Todos</SelectItem>
+                <SelectItem value="T1">Bimestre 1</SelectItem>
+                <SelectItem value="T2">Bimestre 2</SelectItem>
+                <SelectItem value="T3">Bimestre 3</SelectItem>
+                <SelectItem value="T4">Bimestre 4</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={handleConducta}>
+            <Star className="h-4 w-4 mr-1" />
+            Conducta
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleProgreso}>
+            <TrendingUp className="h-4 w-4 mr-1" />
+            Progreso
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleAsistencia}>
+            <Calendar className="h-4 w-4 mr-1" />
+            Asistencia
+          </Button>
+        </div>
+      </div>
+
+      {/* Tabla de notas */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Calificaciones por Materia</CardTitle>
+          <CardDescription>
+            Notas del año académico 2025 - {trimestre === 'Todos' ? 'Todos los bimestres' : `Bimestre ${trimestre.replace('T', '')}`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {filteredGrades.length === 0 ? (
+            <div className="text-center py-12">
+              <BookOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium mb-2">Sin calificaciones</h3>
+              <p className="text-muted-foreground">
+                No hay calificaciones disponibles para mostrar
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Evaluación</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead className="text-center">Peso (%)</TableHead>
-                    <TableHead className="text-center">Nota</TableHead>
+                    <TableHead className="w-[200px]">Materia</TableHead>
+                    <TableHead>Docente</TableHead>
+                    <TableHead className="text-center">B1</TableHead>
+                    <TableHead className="text-center">B2</TableHead>
+                    <TableHead className="text-center">B3</TableHead>
+                    <TableHead className="text-center">B4</TableHead>
+                    <TableHead className="text-center">Promedio</TableHead>
                     <TableHead className="text-center">Estado</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(selectedCourse ? (nota0DataByCourseId[selectedCourse.id] || []) : []).map((ev) => (
-                    <TableRow key={ev.id}>
-                      <TableCell className="font-medium">{ev.nombre}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="font-normal">
-                          {ev.tipo}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center">{ev.peso}%</TableCell>
-                      <TableCell className="text-center">
-                        <span className={ev.nota >= 51 ? 'text-emerald-600' : 'text-red-600'}>
-                          {ev.nota}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {ev.nota >= 51 ? (
-                          <Badge variant="default" className="bg-emerald-500">Aprobado</Badge>
-                        ) : (
-                          <Badge variant="destructive">Necesita mejorar</Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {filteredGrades.map((subject, index) => {
+                    const notasPorBim: (number | null)[] = [1, 2, 3, 4].map(bim => {
+                      const nota = subject.notas.find(n => n.bimestre === bim);
+                      return nota ? nota.nota : null;
+                    });
+
+                    return (
+                      <TableRow key={index} className="hover:bg-muted/50">
+                        <TableCell className="font-medium">{subject.materia}</TableCell>
+                        <TableCell className="text-muted-foreground">{subject.docente}</TableCell>
+                        {notasPorBim.map((nota, i) => (
+                          <TableCell key={i} className="text-center">
+                            {nota !== null ? (
+                              <span className={`inline-flex items-center justify-center w-10 h-8 rounded ${getNotaColor(nota)}`}>
+                                {nota}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                        ))}
+                        <TableCell className="text-center">
+                          <span className={`inline-flex items-center justify-center w-12 h-8 rounded font-bold ${getNotaColor(subject.promedioAnual)}`}>
+                            {subject.promedioAnual}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {getAprobadoBadge(subject.aprobado)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleVerDetalle(subject)}
+                          >
+                            <FileText className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
+          )}
+        </CardContent>
+      </Card>
 
-            {/* Consejos y Recursos */}
-            <Card className="bg-blue-50/50">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <div className="p-2 rounded-full bg-blue-100">
-                    <Info className="h-5 w-5 text-blue-500" />
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-2">¿Cómo interpretar las notas?</h4>
-                    <ul className="text-sm text-muted-foreground space-y-1">
-                      <li>• Las notas se consideran aprobadas desde 51 puntos</li>
-                      <li>• El peso indica la importancia de cada evaluación en la nota final</li>
-                      <li>• Revise las evaluaciones marcadas como "Necesita mejorar"</li>
-                      <li>• Puede descargar el boletín completo para más detalles</li>
-                    </ul>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+      {/* Leyenda */}
+      <Card>
+        <CardContent className="pt-4">
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <span className="font-medium">Escala de Calificación (Bolivia):</span>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-4 h-4 rounded bg-green-100"></span>
+              <span>80-100: Excelente</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-4 h-4 rounded bg-blue-100"></span>
+              <span>51-79: Aprobado</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-4 h-4 rounded bg-red-100"></span>
+              <span>0-50: Reprobado</span>
+            </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Modal de detalle */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BookOpen className="h-5 w-5" />
+              {selectedSubject?.materia}
+            </DialogTitle>
+            <DialogDescription>
+              Docente: {selectedSubject?.docente}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedSubject && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-muted/50 rounded-lg text-center">
+                  <p className="text-sm text-muted-foreground">Promedio Anual</p>
+                  <p className={`text-3xl font-bold ${selectedSubject.promedioAnual >= 51 ? 'text-green-600' : 'text-red-600'}`}>
+                    {selectedSubject.promedioAnual}
+                  </p>
+                </div>
+                <div className="p-4 bg-muted/50 rounded-lg text-center">
+                  <p className="text-sm text-muted-foreground">Estado</p>
+                  <p className="mt-2">
+                    {getAprobadoBadge(selectedSubject.aprobado)}
+                  </p>
+                </div>
+              </div>
+              
+              <div>
+                <h4 className="font-medium mb-3">Detalle por Bimestre</h4>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Bimestre</TableHead>
+                      <TableHead className="text-center">Nota</TableHead>
+                      <TableHead className="text-center">Asistencia</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedSubject.notas.map((nota, i) => (
+                      <TableRow key={i}>
+                        <TableCell>Bimestre {nota.bimestre}</TableCell>
+                        <TableCell className="text-center">
+                          <span className={`inline-flex items-center justify-center w-10 h-8 rounded ${getNotaColor(nota.nota)}`}>
+                            {nota.nota}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {nota.porcentajeAsistencia !== undefined ? `${nota.porcentajeAsistencia}%` : '-'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="outline" onClick={() => setDetailOpen(false)}>
+                  Cerrar
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
